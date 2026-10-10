@@ -6,7 +6,8 @@
 //! to the arms a device always carries, and refuses the rest the way the
 //! firmware refuses them.
 
-use std::collections::VecDeque;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, VecDeque};
 use std::io;
 use std::time::Duration;
 
@@ -149,4 +150,211 @@ pub fn common(request: proto::Request) -> Vec<proto::Reply> {
         }),
     };
     vec![numbered(&request, kind)]
+}
+
+/// A device whose profile store is in memory.
+///
+/// It answers the profile domain the way the firmware does: a staged write is
+/// answered once, when the body has been written, and that answer carries the
+/// zero the schema reserves for an answer that belongs to the exchange rather
+/// than to one frame; a read answers with its opening arm and then the pieces,
+/// which carry the same zero. The common arms are answered beside those.
+///
+/// It is what a consumer is tried against when no board is on the desk, and
+/// what the shape of the exchange is pinned by.
+pub fn profiles() -> SimulatedDevice {
+    let store = RefCell::new(ProfileStore::default());
+
+    SimulatedDevice::new(move |request| {
+        let number = request.queued.unwrap_or(0).wrapping_add(1);
+        let answer = |kind| {
+            vec![proto::Reply {
+                queued: Some(number),
+                kind: Some(kind),
+            }]
+        };
+        let exchange = |kind| {
+            vec![proto::Reply {
+                queued: Some(0),
+                kind: Some(kind),
+            }]
+        };
+        let refused = |code: proto::ErrorCode, reason: proto::Reason| {
+            answer(proto::reply::Kind::Error(proto::Error {
+                code: Some(code as i32),
+                reason: reason as i32,
+                param1: 0,
+                param2: 0,
+            }))
+        };
+
+        let Some(kind) = request.kind.as_ref() else {
+            return Vec::new();
+        };
+
+        match kind {
+            // ── a body on its way to the store ──
+            proto::request::Kind::ProfileStart(arm) => {
+                store.borrow_mut().begin(Some(arm.id), arm.total as usize);
+                Vec::new()
+            }
+            proto::request::Kind::ProfileCreate(arm) => {
+                store.borrow_mut().begin(None, arm.total as usize);
+                Vec::new()
+            }
+            proto::request::Kind::ProfilePutChunk(chunk) => {
+                match store.borrow_mut().piece(chunk.offset as usize, &chunk.data) {
+                    Ok(()) => Vec::new(),
+                    Err(()) => refused(
+                        proto::ErrorCode::ErrInvalidParam,
+                        proto::Reason::ValueOutOfRange,
+                    ),
+                }
+            }
+            proto::request::Kind::ProfilePutEnd(_) => match store.borrow_mut().finish() {
+                Some((id, len, false)) => {
+                    exchange(proto::reply::Kind::ProfileStart(proto::ProfileStartOk {
+                        id,
+                        len,
+                    }))
+                }
+                Some((id, len, true)) => {
+                    exchange(proto::reply::Kind::ProfileCreate(proto::ProfileCreateOk {
+                        id,
+                        len,
+                    }))
+                }
+                None => refused(proto::ErrorCode::ErrInvalidState, proto::Reason::None),
+            },
+
+            // ── a body on its way back to the host ──
+            proto::request::Kind::ProfileGet(arm) => {
+                let id = arm.id.unwrap_or(0);
+                let body = match store.borrow().body(id) {
+                    Some(body) => body.to_vec(),
+                    None => {
+                        return refused(
+                            proto::ErrorCode::ErrInvalidParam,
+                            proto::Reason::ProfileNotFound,
+                        );
+                    }
+                };
+                let mut replies = vec![proto::Reply {
+                    queued: Some(number),
+                    kind: Some(proto::reply::Kind::ProfileGet(proto::ProfileGetStart {
+                        total: body.len() as u32,
+                        id,
+                    })),
+                }];
+                let mut at = 0;
+                while at < body.len() {
+                    let end = (at + 1000).min(body.len());
+                    replies.push(proto::Reply {
+                        queued: Some(0),
+                        kind: Some(proto::reply::Kind::ProfileChunk(proto::ProfileChunk {
+                            offset: at as u32,
+                            data: body[at..end].to_vec(),
+                        })),
+                    });
+                    at = end;
+                }
+                replies.push(proto::Reply {
+                    queued: Some(0),
+                    kind: Some(proto::reply::Kind::ProfileEnd(proto::ProfileEnd {
+                        total: body.len() as u32,
+                        id,
+                    })),
+                });
+                replies
+            }
+
+            proto::request::Kind::ProfileList(_) => {
+                let store = store.borrow();
+                answer(proto::reply::Kind::ProfileList(proto::ProfileListOk {
+                    active: store.active,
+                    profiles: store
+                        .bodies
+                        .keys()
+                        .map(|id| proto::ProfileEntry {
+                            id: *id,
+                            active: *id == store.active,
+                        })
+                        .collect(),
+                }))
+            }
+            proto::request::Kind::ProfileSelect(arm) => {
+                let mut store = store.borrow_mut();
+                let id = arm.id.unwrap_or(0);
+                store.active = id;
+                answer(proto::reply::Kind::ProfileSelect(proto::ProfileSelectOk {
+                    id,
+                }))
+            }
+            proto::request::Kind::ProfileDelete(arm) => {
+                store.borrow_mut().bodies.remove(&arm.id);
+                answer(proto::reply::Kind::ProfileDelete(proto::ProfileDeleteOk {
+                    id: arm.id,
+                }))
+            }
+
+            // ── everything else is the common device ──
+            _ => common(request.clone()),
+        }
+    })
+}
+
+/// The store the simulated device keeps: one body per profile, and the one body
+/// being staged for it.
+#[derive(Default)]
+struct ProfileStore {
+    bodies: BTreeMap<u32, Vec<u8>>,
+    active: u32,
+    staging: Option<Staging>,
+}
+
+struct Staging {
+    /// The profile asked for, or `None` when the store is to assign one.
+    id: Option<u32>,
+    total: usize,
+    bytes: Vec<u8>,
+}
+
+impl ProfileStore {
+    fn begin(&mut self, id: Option<u32>, total: usize) {
+        self.staging = Some(Staging {
+            id,
+            total,
+            bytes: Vec::with_capacity(total),
+        });
+    }
+
+    fn piece(&mut self, offset: usize, data: &[u8]) -> Result<(), ()> {
+        let Some(staging) = self.staging.as_mut() else {
+            return Err(());
+        };
+        if offset != staging.bytes.len() || staging.bytes.len() + data.len() > staging.total {
+            return Err(());
+        }
+        staging.bytes.extend_from_slice(data);
+        Ok(())
+    }
+
+    /// The body the stream carried, as `(id, length, created)`.
+    fn finish(&mut self) -> Option<(u32, u32, bool)> {
+        let staging = self.staging.take()?;
+        if staging.bytes.len() != staging.total {
+            return None;
+        }
+        let created = staging.id.is_none_or(|id| id == 0);
+        let id = staging
+            .id
+            .unwrap_or_else(|| (1..).find(|id| !self.bodies.contains_key(id)).unwrap());
+        let len = staging.bytes.len() as u32;
+        self.bodies.insert(id, staging.bytes);
+        Some((id, len, created))
+    }
+
+    fn body(&self, id: u32) -> Option<&[u8]> {
+        self.bodies.get(&id).map(Vec::as_slice)
+    }
 }

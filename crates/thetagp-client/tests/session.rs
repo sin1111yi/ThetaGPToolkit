@@ -168,3 +168,106 @@ fn a_frame_the_device_could_not_read_is_handed_up() {
     // is where it was.
     assert_eq!(session.sequence().next(), 1);
 }
+
+fn profiles_session() -> Session<SimulatedDevice> {
+    Session::new(thetagp_client::sim::profiles(), Duration::from_millis(50))
+}
+
+/// A body longer than one piece carries, so the stream is more than one frame.
+fn a_body(bytes: usize) -> Vec<u8> {
+    let mut body = br#"{"ver":2,"map":{"socd":"#.to_vec();
+    while body.len() < bytes {
+        body.push(b'0' + (body.len() % 10) as u8);
+    }
+    body.push(b'}');
+    body
+}
+
+#[test]
+fn a_body_longer_than_one_piece_is_written_and_read_back_whole() {
+    let mut session = profiles_session();
+    let body = a_body(2500);
+
+    let id = session.profile_create(&body).unwrap();
+    assert_eq!(id, 1);
+    assert_eq!(session.profile_get(id).unwrap(), body);
+}
+
+#[test]
+fn a_body_written_to_a_named_profile_keeps_its_id() {
+    let mut session = profiles_session();
+    let body = a_body(64);
+
+    let id = session.profile_put(3, &body).unwrap();
+    assert_eq!(id, 3);
+    assert_eq!(session.profile_get(3).unwrap(), body);
+}
+
+#[test]
+fn the_exchange_is_still_numbered_after_a_staged_write() {
+    let mut session = profiles_session();
+    let body = a_body(1500);
+
+    let id = session.profile_put(2, &body).unwrap();
+    // The staged write's answer belongs to the exchange and carries zero, so it
+    // does not set the numbering back; the arms after it are numbered on.
+    session.ping().unwrap();
+    assert_eq!(session.profile_get(id).unwrap(), body);
+    assert!(session.sequence().next() > 5);
+}
+
+#[test]
+fn a_profile_can_be_listed_selected_and_deleted() {
+    let mut session = profiles_session();
+    let first = session.profile_put(1, &a_body(32)).unwrap();
+    let second = session.profile_put(2, &a_body(32)).unwrap();
+
+    let listed = session.profiles().unwrap();
+    assert_eq!(listed.profiles.len(), 2);
+
+    let selected = session.profile_select(second).unwrap();
+    assert_eq!(selected.id, second);
+
+    session.profile_delete(first).unwrap();
+    let listed = session.profiles().unwrap();
+    assert_eq!(listed.profiles.len(), 1);
+    assert_eq!(listed.profiles[0].id, second);
+    assert!(listed.profiles[0].active);
+}
+
+#[test]
+fn reading_a_profile_the_store_does_not_carry_is_refused() {
+    let mut session = profiles_session();
+    match session.profile_get(9).unwrap_err() {
+        SessionError::Refused(error) => {
+            assert_eq!(error.reason, proto::Reason::ProfileNotFound as i32)
+        }
+        other => panic!("{other}"),
+    }
+}
+
+#[test]
+fn a_body_the_store_refuses_is_reported() {
+    // A device that refuses the opening arm of a staged write: the refusal is
+    // answered at once, and it is what the exchange ends as.
+    let mut session = session_with(|request| {
+        let number = request.queued.unwrap_or(0).wrapping_add(1);
+        vec![proto::Reply {
+            queued: Some(number),
+            kind: Some(proto::reply::Kind::Error(proto::Error {
+                code: Some(proto::ErrorCode::ErrInvalidParam as i32),
+                reason: proto::Reason::ValueOutOfRange as i32,
+                param1: 1,
+                param2: 4096,
+            })),
+        }]
+    });
+
+    match session.profile_create(&a_body(16)).unwrap_err() {
+        SessionError::Refused(error) => {
+            assert_eq!(error.reason, proto::Reason::ValueOutOfRange as i32);
+            assert_eq!(error.param2, 4096);
+        }
+        other => panic!("{other}"),
+    }
+}
