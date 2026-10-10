@@ -8,6 +8,7 @@ description = "The ThetaGP protocol client: one method per arm over one connecti
 
 [dependencies]
 prost.workspace = true
+prost-reflect.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serialport.workspace = true
