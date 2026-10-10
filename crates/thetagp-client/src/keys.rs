@@ -20,6 +20,20 @@ pub enum Value {
     Array(Vec<i32>),
 }
 
+impl Value {
+    /// The value a `config.get_key` answer carries: one number for a scalar key
+    /// and a run for an array key, in element order.
+    pub fn from_answer(answer: &proto::ConfigGetKeyOk) -> Value {
+        match &answer.value {
+            Some(proto::config_get_key_ok::Value::Scalar(number)) => Value::Scalar(*number),
+            Some(proto::config_get_key_ok::Value::Array(array)) => {
+                Value::Array(array.elements.clone())
+            }
+            None => Value::Scalar(0),
+        }
+    }
+}
+
 /// What a key's value is made of.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum KeyType {

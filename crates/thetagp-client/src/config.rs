@@ -7,7 +7,6 @@
 use std::collections::BTreeMap;
 
 use crate::keys::{KeySpace, Reject, Value};
-use crate::proto;
 use crate::session::{Session, SessionError};
 use crate::transport::Transport;
 
@@ -56,7 +55,7 @@ impl Config {
         let mut values = BTreeMap::new();
         for key in space.keys() {
             let answer = session.get_key(&key.name)?;
-            values.insert(key.name.clone(), value_of(&answer));
+            values.insert(key.name.clone(), Value::from_answer(&answer));
         }
         Ok(Config { space, values })
     }
@@ -93,14 +92,5 @@ impl Config {
             }
         }
         changed
-    }
-}
-
-/// The value an answer carries.
-fn value_of(answer: &proto::ConfigGetKeyOk) -> Value {
-    match &answer.value {
-        Some(proto::config_get_key_ok::Value::Scalar(number)) => Value::Scalar(*number),
-        Some(proto::config_get_key_ok::Value::Array(array)) => Value::Array(array.elements.clone()),
-        None => Value::Scalar(0),
     }
 }
