@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/thetagp-proto", "crates/thetagp-wire"]
+members = ["crates/thetagp-client", "crates/thetagp-proto", "crates/thetagp-wire"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,5 +10,7 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 prost = "0.14"
+serialport = "4"
+thetagp-client = { path = "crates/thetagp-client" }
 thetagp-proto = { path = "crates/thetagp-proto" }
 thetagp-wire = { path = "crates/thetagp-wire" }

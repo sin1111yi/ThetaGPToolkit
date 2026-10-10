@@ -1,0 +1,22 @@
+//! The ThetaGP protocol client: the wire and the messages, and the exchange
+//! between them.
+//!
+//! One connection carries one exchange at a time. A [`Session`] numbers the
+//! frames it writes, holds each reply against its request, and hands the reply
+//! up; a [`Transport`] is what the bytes travel over -- a serial port in the
+//! field, and the simulated device in [`sim`] for tests and for an offline run.
+//!
+//! Nothing here names a board or a port: the consumer above decides which device
+//! to talk to, and every method below is one arm of the schema.
+
+pub mod session;
+pub mod sim;
+pub mod transport;
+
+pub use session::{Sequence, Session, SessionError};
+pub use transport::{SerialTransport, Transport};
+
+/// The arms, re-exported so a consumer names a command through this crate.
+pub use thetagp_proto as proto;
+/// The wire, re-exported for the same reason.
+pub use thetagp_wire as wire;

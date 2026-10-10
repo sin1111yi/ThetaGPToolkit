@@ -71,23 +71,25 @@ fn a_failure_reply_carries_its_code_and_its_reason() {
 fn a_listing_reply_carries_one_entry_per_key() {
     let reply = proto::Reply {
         queued: Some(10),
-        kind: Some(proto::reply::Kind::ConfigListKeys(proto::ConfigListKeysOk {
-            count: 2,
-            keys: vec![
-                proto::ConfigKeyEntry {
-                    key: "led.bri".to_string(),
-                    min: 0,
-                    max: 255,
-                    ..Default::default()
-                },
-                proto::ConfigKeyEntry {
-                    key: "usb.input_mode".to_string(),
-                    min: 0,
-                    max: 255,
-                    ..Default::default()
-                },
-            ],
-        })),
+        kind: Some(proto::reply::Kind::ConfigListKeys(
+            proto::ConfigListKeysOk {
+                count: 2,
+                keys: vec![
+                    proto::ConfigKeyEntry {
+                        key: "led.bri".to_string(),
+                        min: 0,
+                        max: 255,
+                        ..Default::default()
+                    },
+                    proto::ConfigKeyEntry {
+                        key: "usb.input_mode".to_string(),
+                        min: 0,
+                        max: 255,
+                        ..Default::default()
+                    },
+                ],
+            },
+        )),
     };
 
     match through_the_wire(&reply).kind {
