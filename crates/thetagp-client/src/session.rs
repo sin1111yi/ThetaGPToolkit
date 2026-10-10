@@ -8,6 +8,7 @@ use prost::Message;
 use thetagp_proto as proto;
 use thetagp_wire as wire;
 
+use crate::keys::{KeySpace, Value};
 use crate::transport::Transport;
 
 /// Bytes of a body one piece carries on its way to the store.
@@ -308,6 +309,20 @@ impl<T: Transport> Session<T> {
             proto::reply::Kind::SysGetUsage(ok) => Some(ok),
             _ => None,
         })
+    }
+
+    /// Every key the device declares, in the order it declared them.
+    pub fn key_space(&mut self) -> Result<KeySpace, SessionError> {
+        let declared = self.list_keys()?;
+        Ok(KeySpace::from_entries(&declared.keys))
+    }
+
+    /// Writes one configuration value, whichever of the two shapes it has.
+    pub fn write_value(&mut self, name: &str, value: &Value) -> Result<(), SessionError> {
+        match value {
+            Value::Scalar(number) => self.set_key(name, *number),
+            Value::Array(elements) => self.set_key_array(name, elements),
+        }
     }
 
     /// Every configuration key the device carries, with its type and range.

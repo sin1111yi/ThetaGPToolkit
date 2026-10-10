@@ -9,10 +9,16 @@
 //! Nothing here names a board or a port: the consumer above decides which device
 //! to talk to, and every method below is one arm of the schema.
 
+pub mod backup;
+pub mod config;
+pub mod keys;
 pub mod session;
 pub mod sim;
 pub mod transport;
 
+pub use backup::{Restored, Snapshot};
+pub use config::Config;
+pub use keys::{Key, KeySpace, KeyType, Reject, Value};
 pub use session::{Sequence, Session, SessionError};
 pub use transport::{SerialTransport, Transport};
 

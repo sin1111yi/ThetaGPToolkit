@@ -13,6 +13,8 @@ use std::time::Duration;
 
 use prost::Message;
 use thetagp_proto as proto;
+
+use crate::keys::Value;
 use thetagp_wire as wire;
 
 use crate::transport::Transport;
@@ -152,7 +154,7 @@ pub fn common(request: proto::Request) -> Vec<proto::Reply> {
     vec![numbered(&request, kind)]
 }
 
-/// A device whose profile store is in memory.
+/// A device whose stores are in memory.
 ///
 /// It answers the profile domain the way the firmware does: a staged write is
 /// answered once, when the body has been written, and that answer carries the
@@ -162,8 +164,9 @@ pub fn common(request: proto::Request) -> Vec<proto::Reply> {
 ///
 /// It is what a consumer is tried against when no board is on the desk, and
 /// what the shape of the exchange is pinned by.
-pub fn profiles() -> SimulatedDevice {
+pub fn device() -> SimulatedDevice {
     let store = RefCell::new(ProfileStore::default());
+    let config = RefCell::new(ConfigStore::default());
 
     SimulatedDevice::new(move |request| {
         let number = request.queued.unwrap_or(0).wrapping_add(1);
@@ -297,6 +300,74 @@ pub fn profiles() -> SimulatedDevice {
                 }))
             }
 
+            // ── the configuration the device carries ──
+            proto::request::Kind::ConfigListKeys(_) => {
+                let config = config.borrow();
+                answer(proto::reply::Kind::ConfigListKeys(
+                    proto::ConfigListKeysOk {
+                        count: config.keys.len() as u32,
+                        keys: config.keys.clone(),
+                    },
+                ))
+            }
+            proto::request::Kind::ConfigGetKey(arm) => {
+                let config = config.borrow();
+                match config.values.get(&arm.key) {
+                    Some(Value::Scalar(number)) => {
+                        answer(proto::reply::Kind::ConfigGetKey(proto::ConfigGetKeyOk {
+                            value: Some(proto::config_get_key_ok::Value::Scalar(*number)),
+                            key: arm.key.clone(),
+                        }))
+                    }
+                    Some(Value::Array(elements)) => {
+                        answer(proto::reply::Kind::ConfigGetKey(proto::ConfigGetKeyOk {
+                            value: Some(proto::config_get_key_ok::Value::Array(
+                                proto::Int32Array {
+                                    elements: elements.clone(),
+                                },
+                            )),
+                            key: arm.key.clone(),
+                        }))
+                    }
+                    None => refused(proto::ErrorCode::ErrInvalidParam, proto::Reason::UnknownKey),
+                }
+            }
+            proto::request::Kind::ConfigSetKey(arm) => {
+                let value = match &arm.value {
+                    Some(proto::config_set_key::Value::Scalar(number)) => Value::Scalar(*number),
+                    Some(proto::config_set_key::Value::Array(array)) => {
+                        Value::Array(array.elements.clone())
+                    }
+                    None => Value::Scalar(0),
+                };
+                // The device holds a value to the key it declares, the way the
+                // client does before it writes one.
+                match config.borrow_mut().set(&arm.key, value) {
+                    Ok(()) => answer(proto::reply::Kind::ConfigSetKey(proto::ConfigSetKeyOk {
+                        key: arm.key.clone(),
+                    })),
+                    Err(_) => refused(
+                        proto::ErrorCode::ErrInvalidParam,
+                        proto::Reason::ValueOutOfRange,
+                    ),
+                }
+            }
+            proto::request::Kind::ConfigSave(_) => {
+                answer(proto::reply::Kind::ConfigSave(proto::ConfigSaveOk {
+                    persisted: true,
+                    dropped_keys: None,
+                }))
+            }
+            proto::request::Kind::ConfigLoad(_) => {
+                answer(proto::reply::Kind::ConfigLoad(proto::ConfigLoadOk {}))
+            }
+            proto::request::Kind::ConfigFactoryReset(_) => {
+                config.borrow_mut().factory_reset();
+                answer(proto::reply::Kind::ConfigFactoryReset(
+                    proto::ConfigFactoryResetOk { persisted: true },
+                ))
+            }
+
             // ── everything else is the common device ──
             _ => common(request.clone()),
         }
@@ -357,4 +428,110 @@ impl ProfileStore {
     fn body(&self, id: u32) -> Option<&[u8]> {
         self.bodies.get(&id).map(Vec::as_slice)
     }
+}
+
+/// The configuration the simulated device carries: the keys it declares, and the
+/// value each holds.
+struct ConfigStore {
+    keys: Vec<proto::ConfigKeyEntry>,
+    space: crate::keys::KeySpace,
+    values: BTreeMap<String, Value>,
+}
+
+impl Default for ConfigStore {
+    fn default() -> Self {
+        Self::new(declared_keys(), declared_values())
+    }
+}
+
+impl ConfigStore {
+    fn new(keys: Vec<proto::ConfigKeyEntry>, values: BTreeMap<String, Value>) -> Self {
+        ConfigStore {
+            space: crate::keys::KeySpace::from_entries(&keys),
+            keys,
+            values,
+        }
+    }
+
+    /// Holds a value to the key it belongs to, as the device does.
+    fn set(&mut self, name: &str, value: Value) -> Result<(), crate::keys::Reject> {
+        self.space.check(name, &value)?;
+        self.values.insert(name.to_string(), value);
+        Ok(())
+    }
+
+    fn factory_reset(&mut self) {
+        self.values = declared_values();
+    }
+}
+
+/// The keys the simulated device declares.
+fn declared_keys() -> Vec<proto::ConfigKeyEntry> {
+    vec![
+        entry("map.socd", 0, 3, proto::ConfigKeyType::ConfigKeyU8, 0, true),
+        entry(
+            "map.btn_map",
+            0,
+            32,
+            proto::ConfigKeyType::ConfigKeyU8Array,
+            8,
+            false,
+        ),
+        entry(
+            "led.bri",
+            0,
+            255,
+            proto::ConfigKeyType::ConfigKeyU8,
+            0,
+            false,
+        ),
+        entry(
+            "led.rgb.hz",
+            1,
+            100,
+            proto::ConfigKeyType::ConfigKeyU8,
+            0,
+            false,
+        ),
+        entry(
+            "usb.input_mode",
+            0,
+            255,
+            proto::ConfigKeyType::ConfigKeyU8,
+            0,
+            true,
+        ),
+    ]
+}
+
+fn entry(
+    key: &str,
+    min: i32,
+    max: i32,
+    kind: proto::ConfigKeyType,
+    count: u32,
+    reboot: bool,
+) -> proto::ConfigKeyEntry {
+    proto::ConfigKeyEntry {
+        key: key.to_string(),
+        min,
+        max,
+        reboot,
+        r#type: kind as i32,
+        count,
+    }
+}
+
+/// The values the simulated device holds before anything is written.
+fn declared_values() -> BTreeMap<String, Value> {
+    BTreeMap::from([
+        ("map.socd".to_string(), Value::Scalar(0)),
+        (
+            "map.btn_map".to_string(),
+            Value::Array(vec![1, 2, 3, 4, 5, 6, 7, 8]),
+        ),
+        ("led.bri".to_string(), Value::Scalar(128)),
+        ("led.rgb.hz".to_string(), Value::Scalar(10)),
+        ("usb.input_mode".to_string(), Value::Scalar(14)),
+    ])
 }

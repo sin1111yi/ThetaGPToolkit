@@ -170,7 +170,7 @@ fn a_frame_the_device_could_not_read_is_handed_up() {
 }
 
 fn profiles_session() -> Session<SimulatedDevice> {
-    Session::new(thetagp_client::sim::profiles(), Duration::from_millis(50))
+    Session::new(thetagp_client::sim::device(), Duration::from_millis(50))
 }
 
 /// A body longer than one piece carries, so the stream is more than one frame.
