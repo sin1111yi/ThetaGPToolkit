@@ -187,3 +187,37 @@ fn a_tool_the_server_has_not_is_an_answer_that_says_so() {
     let answer = call(&mut session, "no_such_tool", json!({}));
     assert_eq!(answer["isError"], true);
 }
+
+#[test]
+fn the_reset_asks_the_device_to_restart() {
+    let mut session = session();
+    let answer = text_of(&mut session, "reset", json!({}));
+    assert!(answer.contains("restarting"), "{answer}");
+}
+
+#[test]
+fn the_check_holds_the_active_profile_against_what_is_in_effect() {
+    let mut session = session();
+
+    let created = text_of(
+        &mut session,
+        "profile_create",
+        json!({ "body": "{\"ver\":2,\"map\":{\"socd\":3}}" }),
+    );
+    let id = serde_json::from_str::<Json>(&created).expect("the answer carries the id")["id"]
+        .as_u64()
+        .expect("the created profile has an id");
+    text_of(&mut session, "profile_select", json!({ "id": id }));
+
+    // A profile that is what the device runs reads as in effect.
+    text_of(&mut session, "set_key", json!({ "key": "map.socd", "value": 3 }));
+    let checked = text_of(&mut session, "check", json!({}));
+    assert!(checked.contains("\"profile_is_in_effect\": true"), "{checked}");
+    assert!(checked.contains("\"matching\": 1"), "{checked}");
+
+    // One the device has been told to run from, and is not, names the key.
+    text_of(&mut session, "set_key", json!({ "key": "map.socd", "value": 1 }));
+    let checked = text_of(&mut session, "check", json!({}));
+    assert!(checked.contains("\"profile_is_in_effect\": false"), "{checked}");
+    assert!(checked.contains("map.socd"), "{checked}");
+}

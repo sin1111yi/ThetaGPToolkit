@@ -6,6 +6,8 @@
 //! run of frames. The protocol tools are what reaches an arm this build has no
 //! method for, and what reads a frame's bytes back.
 
+use std::collections::BTreeMap;
+
 use serde_json::{Value as Json, json};
 
 use thetagp_client::{Session, Snapshot, Transport, Value, dynamic, wire};
@@ -56,6 +58,8 @@ pub fn catalogue() -> Json {
         tool("save_config", "Writes the configuration to the device's storage.", json!({}), &[]),
         tool("load_config", "Reads the stored configuration back into effect.", json!({}), &[]),
         tool("factory_reset", "Puts the configuration back to the defaults the device declares.", json!({}), &[]),
+        tool("reset", "Restarts the device; it goes down as it takes the request, so the answer may be lost with it.", json!({}), &[]),
+        tool("check", "The configuration the device is running against the profile it runs from, key by key.", json!({}), &[]),
         tool("profiles", "Every profile the store carries, and which of them is active.", json!({}), &[]),
         tool("profile_status", "How the store's flash is accounted for.", json!({}), &[]),
         tool("profile_get", "A profile's body, as the JSON the store keeps.", json!({ "id": id }), &["id"]),
@@ -82,6 +86,43 @@ pub fn catalogue() -> Json {
             "hex": { "type": "string", "description": "The frame's bytes, in hex" },
         }), &["hex"]),
     ]})
+}
+
+/// The settings a profile body carries, by key name.
+///
+/// A body is the JSON the store keeps: `ver` versions the body itself, and
+/// every path below it is a setting, spelled as the key's own name -- so
+/// `{"ver":2,"map":{"socd":3}}` carries `map.socd`. A path whose value is
+/// neither one number nor a run of them is not a setting and is left out.
+fn body_settings(body: &Json, prefix: &str, into: &mut BTreeMap<String, Value>) {
+    if let Some(entries) = body.as_object() {
+        for (name, value) in entries {
+            if name == "ver" {
+                continue;
+            }
+            let path = if prefix.is_empty() {
+                name.clone()
+            } else {
+                format!("{prefix}.{name}")
+            };
+            match value {
+                Json::Object(_) => body_settings(value, &path, into),
+                Json::Number(number) => {
+                    if let Some(number) = number.as_i64() {
+                        into.insert(path, Value::Scalar(number));
+                    }
+                }
+                Json::Array(elements) => {
+                    let mut run = Vec::with_capacity(elements.len());
+                    run.extend(elements.iter().filter_map(Json::as_i64).map(|n| n as i32));
+                    if run.len() == elements.len() {
+                        into.insert(path, Value::Array(run));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 /// Runs one tool.
@@ -177,6 +218,58 @@ pub fn call<T: Transport>(
         "factory_reset" => {
             session.factory_reset()?;
             text("the configuration is back to its defaults")
+        }
+        "reset" => {
+            // The reset can take the wire down while the answer is still on it,
+            // so a reply that never arrives is read as the reset that was asked
+            // for rather than as a failure of the request.
+            match session.reset() {
+                Ok(()) => text("the device is restarting"),
+                Err(error) => text(json!({
+                    "restarting": true,
+                    "answer_lost": error.to_string(),
+                })),
+            }
+        }
+        "check" => {
+            let space = session.key_space()?;
+            let listed = session.profiles()?;
+            let active = listed.active;
+            let body = session.profile_get(active)?;
+            let parsed: Json = serde_json::from_slice(&body).unwrap_or(Json::Null);
+
+            let mut settings = BTreeMap::new();
+            body_settings(&parsed, "", &mut settings);
+
+            let mut matching = 0usize;
+            let mut mismatched = Vec::new();
+            let mut unreported = Vec::new();
+            for (name, carried) in &settings {
+                // A body may carry a key this device does not report, and one
+                // is not asked for: what cannot be read is named as such.
+                if space.get(name).is_none() {
+                    unreported.push(name.clone());
+                    continue;
+                }
+                let in_effect = Value::from_answer(&session.get_key(name)?);
+                if &in_effect == carried {
+                    matching += 1;
+                } else {
+                    mismatched.push(json!({
+                        "key": name,
+                        "in_the_profile": carried,
+                        "in_effect": in_effect,
+                    }));
+                }
+            }
+            text(json!({
+                "active": active,
+                "settings_in_the_profile": settings.len(),
+                "matching": matching,
+                "mismatched": mismatched,
+                "not_reported_by_this_device": unreported,
+                "profile_is_in_effect": mismatched.is_empty(),
+            }))
         }
         "profiles" => {
             let listed = session.profiles()?;
