@@ -1,0 +1,16 @@
+[package]
+name = "thetagp-proto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "The ThetaGP request and reply types, generated from the pinned schema"
+
+[dependencies]
+prost.workspace = true
+
+[dev-dependencies]
+thetagp-wire.workspace = true
+
+[build-dependencies]
+prost-build = "0.14"

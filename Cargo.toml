@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/thetagp-wire"]
+members = ["crates/thetagp-proto", "crates/thetagp-wire"]
 
 [workspace.package]
 version = "0.1.0"
@@ -9,4 +9,6 @@ license = "GPL-3.0-or-later"
 rust-version = "1.85"
 
 [workspace.dependencies]
+prost = "0.14"
+thetagp-proto = { path = "crates/thetagp-proto" }
 thetagp-wire = { path = "crates/thetagp-wire" }
