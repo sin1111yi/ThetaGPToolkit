@@ -70,3 +70,33 @@ impl Transport for SerialTransport {
         Ok(())
     }
 }
+
+impl<T: Transport + ?Sized> Transport for Box<T> {
+    fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+        (**self).write_all(bytes)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        (**self).flush()
+    }
+
+    fn read(&mut self, buf: &mut [u8], timeout: Duration) -> io::Result<usize> {
+        (**self).read(buf, timeout)
+    }
+
+    fn flush_input(&mut self) -> io::Result<()> {
+        (**self).flush_input()
+    }
+}
+
+/// The serial ports this machine carries, by the names they are opened with.
+///
+/// The port's own description is left out: a consumer decides which of them to
+/// try by asking them, which is the only answer that distinguishes a device
+/// from a port that merely exists.
+pub fn available_ports() -> Result<Vec<String>, serialport::Error> {
+    Ok(serialport::available_ports()?
+        .into_iter()
+        .map(|port| port.port_name)
+        .collect())
+}

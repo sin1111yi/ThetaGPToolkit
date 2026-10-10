@@ -25,7 +25,14 @@ fn main() {
         println!("cargo:rerun-if-changed={}", proto.display());
     }
 
+    // Beside the Rust types, the schema's own description: a consumer reads it
+    // to name a message, an arm or a field this build has no type for, which is
+    // what a console and a generic sender are.
+    let descriptor_set =
+        std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR")).join("theta_gp.bin");
+
     prost_build::Config::new()
+        .file_descriptor_set_path(&descriptor_set)
         .compile_protos(&protos, &[schema])
         .expect("the schema did not compile");
 }

@@ -176,18 +176,13 @@ impl<T: Transport> Session<T> {
 
     /// Writes one arm and returns the reply that answers it.
     pub fn send(&mut self, kind: proto::request::Kind) -> Result<proto::Reply, SessionError> {
-        let number = self.sequence.take();
-        let request = proto::Request {
-            queued: Some(number),
+        let reply = self.send_request(proto::Request {
+            queued: None,
             kind: Some(kind),
-        };
-        let frame = wire::encode_to_vec(&request.encode_to_vec()).ok_or(SessionError::Payload)?;
-        self.transport.write_all(&frame)?;
-        self.transport.flush()?;
+        })?;
 
         // A refusal and a frame the device could not read are failures of the
         // exchange itself: only the arm that was asked for reaches the caller.
-        let reply = self.await_reply(number)?;
         match reply.kind {
             Some(proto::reply::Kind::Error(error)) => Err(SessionError::Refused(Box::new(error))),
             Some(proto::reply::Kind::TransportError(fault)) => {
@@ -195,6 +190,22 @@ impl<T: Transport> Session<T> {
             }
             _ => Ok(reply),
         }
+    }
+
+    /// Writes a request built elsewhere -- an arm this build has no method for
+    /// -- and returns the reply that answers it. The number is the session's, so
+    /// a caller does not write one, and the reply is handed back as it arrived,
+    /// refusal and all.
+    pub fn send_request(
+        &mut self,
+        mut request: proto::Request,
+    ) -> Result<proto::Reply, SessionError> {
+        let number = self.sequence.take();
+        request.queued = Some(number);
+        let frame = wire::encode_to_vec(&request.encode_to_vec()).ok_or(SessionError::Payload)?;
+        self.transport.write_all(&frame)?;
+        self.transport.flush()?;
+        self.await_reply(number)
     }
 
     /// Reads until the reply of `number`'s request arrives, or the deadline

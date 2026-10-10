@@ -1,6 +1,14 @@
 [workspace]
 resolver = "2"
-members = ["crates/thetagp-client", "crates/thetagp-proto", "crates/thetagp-wire"]
+members = [
+    # crates/thetagp-cli is parked: its console is written, and where a console
+    # belongs -- a command line of its own, or a tool of the MCP server -- is
+    # still open. It is left out of the workspace until that is decided, so the
+    # tree that is built is the tree that is meant.
+    "crates/thetagp-client",
+    "crates/thetagp-proto",
+    "crates/thetagp-wire",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -9,10 +17,13 @@ license = "GPL-3.0-or-later"
 rust-version = "1.85"
 
 [workspace.dependencies]
+clap = { version = "4", features = ["derive", "env"] }
 prost = "0.14"
+prost-reflect = "0.16"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serialport = "4"
+thetagp-cli = { path = "crates/thetagp-cli" }
 thetagp-client = { path = "crates/thetagp-client" }
 thetagp-proto = { path = "crates/thetagp-proto" }
 thetagp-wire = { path = "crates/thetagp-wire" }

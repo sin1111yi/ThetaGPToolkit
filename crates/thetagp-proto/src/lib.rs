@@ -13,3 +13,10 @@ pub mod thetagp {
 }
 
 pub use thetagp::*;
+
+/// The schema's own description, as a descriptor set.
+///
+/// It is what a consumer reads to name a message, an arm or a field that this
+/// build has no Rust type for: a console lists the arms from it, and a sender
+/// builds one it was given by name.
+pub const DESCRIPTOR_SET: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/theta_gp.bin"));
