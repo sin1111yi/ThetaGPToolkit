@@ -1,3 +1,7 @@
 /target
 **/node_modules
 crates/thetagp-app/dist
+
+# A working document, as the firmware keeps its own: what is being decided,
+# while it is being decided.
+docs

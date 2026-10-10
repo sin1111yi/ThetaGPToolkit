@@ -20,8 +20,6 @@ Nothing is reached through a command line, and no consumer is the backend.
 - A profile is a body that travels in a stream, and a snapshot is the whole of
   what a device is set to: its configuration and every profile, as one file.
 
-The scope and the design are in [`docs/scope.md`](docs/scope.md).
-
 ## Features
 
 - The CDC wire: a varint length, the payload, and the payload's byte sum, with
