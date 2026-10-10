@@ -28,16 +28,17 @@ pub fn numbered(request: &proto::Request, kind: proto::reply::Kind) -> proto::Re
 pub struct SimulatedDevice {
     inbound: wire::Decoder,
     outbound: VecDeque<u8>,
-    answer: Box<dyn Fn(proto::Request) -> Option<proto::Reply> + Send>,
+    answer: Box<dyn Fn(proto::Request) -> Vec<proto::Reply> + Send>,
 }
 
 impl SimulatedDevice {
-    /// A device whose answer to a request is `answer`. An answer of `None`
-    /// leaves the request unanswered, which is how a request that is never
-    /// answered is exercised.
+    /// A device whose answer to a request is the replies `answer` returns. An
+    /// empty answer leaves the request unanswered, which is how a request that
+    /// is never answered is exercised; more than one reply is how a stream --
+    /// a flash read, a profile body -- arrives.
     pub fn new<F>(answer: F) -> Self
     where
-        F: Fn(proto::Request) -> Option<proto::Reply> + Send + 'static,
+        F: Fn(proto::Request) -> Vec<proto::Reply> + Send + 'static,
     {
         SimulatedDevice {
             inbound: wire::Decoder::new(),
@@ -52,13 +53,12 @@ impl SimulatedDevice {
     }
 
     fn answer(&mut self, request: &proto::Request) -> io::Result<()> {
-        let Some(reply) = (self.answer)(request.clone()) else {
-            return Ok(());
-        };
-        let frame = wire::encode_to_vec(&reply.encode_to_vec()).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "the reply is above one frame")
-        })?;
-        self.outbound.extend(frame);
+        for reply in (self.answer)(request.clone()) {
+            let frame = wire::encode_to_vec(&reply.encode_to_vec()).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "the reply is above one frame")
+            })?;
+            self.outbound.extend(frame);
+        }
         Ok(())
     }
 }
@@ -89,8 +89,11 @@ impl Transport for SimulatedDevice {
 
 /// The answer to the arms a device always carries; anything else is refused with
 /// `ERR_UNKNOWN_CMD`, the way an arm no handler answers is answered.
-pub fn common(request: proto::Request) -> Option<proto::Reply> {
-    let kind = match request.kind.as_ref()? {
+pub fn common(request: proto::Request) -> Vec<proto::Reply> {
+    let Some(asked) = request.kind.as_ref() else {
+        return Vec::new();
+    };
+    let kind = match asked {
         proto::request::Kind::SysPing(_) => proto::reply::Kind::SysPing(proto::SysPingOk {}),
         proto::request::Kind::SysReset(_) => proto::reply::Kind::SysReset(proto::SysResetOk {}),
         proto::request::Kind::SysGetFwVersion(_) => {
@@ -145,5 +148,5 @@ pub fn common(request: proto::Request) -> Option<proto::Reply> {
             param2: 0,
         }),
     };
-    Some(numbered(&request, kind))
+    vec![numbered(&request, kind)]
 }

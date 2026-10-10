@@ -8,13 +8,20 @@ use thetagp_client::{Session, SessionError, proto};
 
 fn session_with<F>(answer: F) -> Session<SimulatedDevice>
 where
-    F: Fn(proto::Request) -> Option<proto::Reply> + Send + 'static,
+    F: Fn(proto::Request) -> Vec<proto::Reply> + Send + 'static,
 {
     Session::new(SimulatedDevice::new(answer), Duration::from_millis(50))
 }
 
 fn session() -> Session<SimulatedDevice> {
     Session::new(SimulatedDevice::common(), Duration::from_millis(50))
+}
+
+/// A reply of `kind` that is numbered as another exchange's answer.
+fn stale(request: &proto::Request, kind: proto::reply::Kind) -> proto::Reply {
+    let mut reply = numbered(request, kind);
+    reply.queued = Some(99);
+    reply
 }
 
 #[test]
@@ -82,7 +89,11 @@ fn a_command_the_device_does_not_answer_is_refused() {
         }
         other => panic!("{other}"),
     }
-    // The refusal is spelled with the schema's own names.
+}
+
+#[test]
+fn a_refusal_is_spelled_with_the_schema_names() {
+    let mut session = session();
     let spelled = session
         .send(proto::request::Kind::TestMemInfo(
             proto::TestMemInfo::default(),
@@ -94,11 +105,27 @@ fn a_command_the_device_does_not_answer_is_refused() {
 }
 
 #[test]
-fn a_reply_numbered_wrongly_is_an_error() {
+fn a_frame_of_another_exchange_is_read_past() {
     let mut session = session_with(|request| {
-        let mut reply = numbered(&request, proto::reply::Kind::SysPing(proto::SysPingOk {}));
-        reply.queued = Some(99);
-        Some(reply)
+        // A reply that arrived after its own request was given up on, and then
+        // the answer this exchange is waiting for.
+        vec![
+            stale(&request, proto::reply::Kind::SysPing(proto::SysPingOk {})),
+            numbered(&request, proto::reply::Kind::SysPing(proto::SysPingOk {})),
+        ]
+    });
+
+    session.ping().unwrap();
+    assert_eq!(session.sequence().next(), 2);
+}
+
+#[test]
+fn a_reply_that_is_never_numbered_as_this_exchange_is_named() {
+    let mut session = session_with(|request| {
+        vec![stale(
+            &request,
+            proto::reply::Kind::SysPing(proto::SysPingOk {}),
+        )]
     });
 
     match session.ping().unwrap_err() {
@@ -112,7 +139,7 @@ fn a_reply_numbered_wrongly_is_an_error() {
 
 #[test]
 fn a_request_that_is_never_answered_times_out() {
-    let mut session = session_with(|_| None);
+    let mut session = session_with(|_| Vec::new());
     match session.ping().unwrap_err() {
         SessionError::Timeout(_) => {}
         other => panic!("{other}"),
@@ -122,13 +149,13 @@ fn a_request_that_is_never_answered_times_out() {
 #[test]
 fn a_frame_the_device_could_not_read_is_handed_up() {
     let mut session = session_with(|_| {
-        Some(proto::Reply {
+        vec![proto::Reply {
             queued: None,
             kind: Some(proto::reply::Kind::TransportError(proto::TransportError {
                 reason: proto::Reason::FrameChecksum as i32,
                 param1: 0,
             })),
-        })
+        }]
     });
 
     match session.ping().unwrap_err() {

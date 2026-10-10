@@ -188,6 +188,8 @@ impl<T: Transport> Session<T> {
     /// passes.
     fn await_reply(&mut self, number: u32) -> Result<proto::Reply, SessionError> {
         let deadline = Instant::now() + self.timeout;
+        let expected = number.wrapping_add(1);
+        let mut misnumbered = None;
         let mut buffer = [0u8; 256];
         loop {
             while let Some(frame) = self.decoder.next_frame() {
@@ -200,20 +202,24 @@ impl<T: Transport> Session<T> {
                     return Ok(reply);
                 }
 
-                let expected = number.wrapping_add(1);
+                // A frame of another exchange -- a reply that arrived after its
+                // own request was given up on -- is not this one's answer. It is
+                // read past and remembered, and named only if nothing else comes.
                 if reply.queued != Some(expected) {
-                    return Err(SessionError::Numbering {
-                        expected,
-                        got: reply.queued,
-                    });
+                    misnumbered = Some(reply.queued);
+                    continue;
                 }
+
                 self.sequence.after_reply(expected);
                 return Ok(reply);
             }
 
             let now = Instant::now();
             if now >= deadline {
-                return Err(SessionError::Timeout(self.timeout));
+                return match misnumbered {
+                    Some(got) => Err(SessionError::Numbering { expected, got }),
+                    None => Err(SessionError::Timeout(self.timeout)),
+                };
             }
             let read = self.transport.read(&mut buffer, deadline - now)?;
             if read > 0 {
