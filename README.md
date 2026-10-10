@@ -9,8 +9,9 @@ One Cargo workspace, one core, and the consumers that share it: the **frontend**
 and the **MCP server** both call `thetagp-client` in the process they run in.
 Nothing is reached through a command line, and no consumer is the backend.
 
-- The protocol is `ThetaGP.PB`, pinned by a submodule at a tag: the toolkit
-  speaks the same wire the firmware does, at one version on both sides.
+- The protocol is `ThetaGP.PB`, a submodule that follows the schema's `main`:
+  the toolkit speaks the same wire the firmware does, both sides carrying the
+  one commit the branch is on.
 - **It does not depend on the firmware**, and the firmware does not depend on
   it: the firmware builds with no toolkit present, and the toolkit never reads a
   firmware checkout or a firmware build directory.
@@ -25,7 +26,7 @@ Nothing is reached through a command line, and no consumer is the backend.
 - The CDC wire: a varint length, the payload, and the payload's byte sum, with
   the receive side that frames it and the numbering that pairs a reply with its
   request.
-- The messages of the protocol, generated from the pinned schema, and its
+- The messages of the protocol, generated from the schema it carries, and its
   descriptor set, read for what has no Rust type.
 - The device's own commands: the configuration and its keys, the profiles and
   their bodies, the diagnostics and the flash, and a snapshot of the whole of it.
@@ -35,7 +36,8 @@ Nothing is reached through a command line, and no consumer is the backend.
 ## Quick Start
 
 ```bash
-git submodule update --init   # the protocol schema, pinned to a tag
+git submodule update --init      # the protocol schema
+git submodule update --remote    # to the newest schema on its main
 cargo test
 cargo run -p thetagp-mcp -- --simulated   # the server, over a device in-process
 ```
@@ -48,7 +50,7 @@ time) and — to talk to a board — the device's own USB interface.
 ```
 crates/
   thetagp-wire/     the wire: framing, the checksum, the half frame's timeout
-  thetagp-proto/    the messages, generated from the pinned schema
+  thetagp-proto/    the messages, generated from the schema
   thetagp-client/   the exchange, and the device as a model of it:
                     transport, session, keys, config, backup, dynamic, sim
   thetagp-mcp/      the device and the protocol, as tools a model can call
@@ -62,7 +64,7 @@ the frontend, and what was protocol in the drafted one lives in
 
 | Crate | Purpose |
 |---|---|
-| `ThetaGP.PB` | the protocol schema, a submodule pinned to a tag |
+| `ThetaGP.PB` | the protocol schema, a submodule following its `main` |
 | `prost` / `prost-reflect` | the messages, and the messages read by name |
 | `serialport` | the connection to a device |
 | `clap` | the server's own arguments |
