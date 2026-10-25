@@ -5,9 +5,10 @@ MCP server, in one Rust workspace.
 
 ## What it is
 
-One Cargo workspace, one core, and the consumers that share it: the **frontend**
-and the **MCP server** both call `thetagp-client` in the process they run in.
-Nothing is reached through a command line, and no consumer is the backend.
+One Cargo workspace, one core, and one process that owns the device: the
+**daemon**. The **frontend** and the **MCP server** ask it over a local socket,
+so both can be open at once and a device that re-enumerates is picked up again
+under them. Nothing is reached through a command line.
 
 - The protocol is `ThetaGP.PB`, a submodule that follows the schema's `main`:
   the toolkit speaks the same wire the firmware does, both sides carrying the
@@ -30,7 +31,11 @@ Nothing is reached through a command line, and no consumer is the backend.
   descriptor set, read for what has no Rust type.
 - The device's own commands: the configuration and its keys, the profiles and
   their bodies, the diagnostics and the flash, and a snapshot of the whole of it.
+- A daemon that holds the device, so a window and a model share one board, and a
+  socket and a token that only its owner can read in front of it.
 - An MCP server over stdio, so a model can work the device and the protocol.
+- A window over the daemon: the connection, the board's identity, every key the
+  device declares -- written where it is edited -- the profiles, and a snapshot.
 - A simulated device, so every one of those paths runs with no board on the desk.
 
 ## Quick Start
@@ -39,11 +44,27 @@ Nothing is reached through a command line, and no consumer is the backend.
 git submodule update --init      # the protocol schema
 git submodule update --remote    # to the newest schema on its main
 cargo test
-cargo run -p thetagp-mcp -- --simulated   # the server, over a device in-process
+cargo run -p thetagp-daemon              # the device's host; Ctrl-C to stop it
+cargo run -p thetagp-mcp -- --simulated  # the tools, over a device in-process
 ```
 
+The window is built from two sides: the web side first, then the app that
+embeds it.
+
+```bash
+cd crates/thetagp-frontend/ui
+bun install && bun run build     # writes ui/dist, which the app embeds
+cd -
+cargo run -p thetagp-frontend    # needs a display, and a board or `simulated`
+```
+
+A client that finds no daemon starts one beside itself, so the daemon is not
+something to run by hand unless its log is wanted.
+
 Needs Rust 1.85+, `protoc` (the schema is compiled into Rust types at build
-time) and — to talk to a board — the device's own USB interface.
+time), `bun` for the window's web side, and — to talk to a board — the device's
+own USB interface: `/dev/ttyACM*` for the daemon on Linux, which a source
+checkout opens as the user who runs it.
 
 ## Layout
 
