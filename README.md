@@ -35,9 +35,9 @@ again under them.
   socket and a token that only its owner can read in front of it.
 - An MCP server over stdio, so a model can work the device and the protocol.
 - A terminal window over the daemon: the sources, the board's identity, every
-  key the device declares -- written where it is edited -- the profiles, and a
-  snapshot taken and put back. `--frame` renders one screen as text, for a log
-  or a machine with no display.
+  key the device declares -- written where it is edited -- the button remap
+  table one slot at a time, the profiles, and a snapshot taken and put back.
+  `--frame` renders one screen as text, for a log or a machine with no display.
 - A simulated device, so every one of those paths runs with no board on the desk.
 
 ## Quick Start
@@ -56,9 +56,9 @@ cargo run -p thetagp-tui -- --frame               # one screen, as text
 cargo run -p thetagp-tui -- --frame --source /dev/ttyACM0
 ```
 
-Keys: `tab` between the panes, `enter` to connect, edit a value or activate a
-profile, `w` save, `l` load, `t` snapshot, `r` restore, `d` disconnect, `q`
-quit.
+Keys: `tab` between the panes, `enter` to connect, edit a value or a remap slot
+or activate a profile, `w` save, `l` load, `t` snapshot, `r` restore, `d`
+disconnect, `q` quit.
 
 A client that finds no daemon starts one beside itself, so the daemon is not
 something to run by hand unless its log is wanted.

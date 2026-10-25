@@ -120,15 +120,17 @@ fn handle(app: &mut App, code: KeyCode) -> bool {
         KeyCode::Char('q') => return true,
         KeyCode::Tab => {
             app.pane = match app.pane {
-                Pane::Keys => Pane::Profiles,
-                Pane::Profiles => Pane::Sources,
                 Pane::Sources => Pane::Keys,
+                Pane::Keys if app.remap_len() > 0 => Pane::Remap,
+                Pane::Keys => Pane::Profiles,
+                Pane::Remap => Pane::Profiles,
+                Pane::Profiles => Pane::Sources,
             };
         }
         KeyCode::Up => step(app, -1),
         KeyCode::Down => step(app, 1),
         KeyCode::Enter => match app.pane {
-            Pane::Keys => app.begin_edit(),
+            Pane::Keys | Pane::Remap => app.begin_edit(),
             Pane::Profiles => act(app, |app| app.select_profile()),
             Pane::Sources => act(app, |app| app.connect()),
         },
@@ -165,8 +167,10 @@ fn step(app: &mut App, delta: i32) {
         };
     };
 
+    let remap_len = app.remap_len();
     match app.pane {
         Pane::Keys => move_within(&mut app.selected, app.keys.len()),
+        Pane::Remap => move_within(&mut app.remap_selected, remap_len),
         Pane::Profiles => move_within(&mut app.profile_selected, app.profiles.len()),
         Pane::Sources => {
             let length = app.sources.len();

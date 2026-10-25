@@ -10,28 +10,39 @@ use ratatui::widgets::{
 
 use thetagp_client::KeyType;
 
-use crate::app::{App, Pane};
+use crate::app::{App, Pane, Target};
 
 const ACCENT: Color = Color::Rgb(90, 156, 255);
 const MUTED: Color = Color::Rgb(139, 146, 156);
 
 pub fn draw(frame: &mut Frame, app: &App) {
+    let mut constraints = vec![
+        Constraint::Length(3), // header
+        Constraint::Length(5), // sources
+        Constraint::Min(8),    // keys
+    ];
+    let has_remap = app.remap_len() > 0;
+    if has_remap {
+        constraints.push(Constraint::Length(10));
+    }
+    constraints.push(Constraint::Length(6)); // profiles
+    constraints.push(Constraint::Length(3)); // status
+
     let areas = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Length(5),
-            Constraint::Min(8),
-            Constraint::Length(6),
-            Constraint::Length(3),
-        ])
+        .constraints(constraints)
         .split(frame.area());
 
     draw_header(frame, app, areas[0]);
     draw_sources(frame, app, areas[1]);
     draw_keys(frame, app, areas[2]);
-    draw_profiles(frame, app, areas[3]);
-    draw_status(frame, app, areas[4]);
+    let mut at = 3;
+    if has_remap {
+        draw_remap(frame, app, areas[at]);
+        at += 1;
+    }
+    draw_profiles(frame, app, areas[at]);
+    draw_status(frame, app, areas[at + 1]);
 }
 
 fn draw_header(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -110,10 +121,12 @@ fn draw_keys(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .enumerate()
         .map(|(index, key)| {
             let shown = match &app.editing {
-                Some(editing) if editing.row == index => format!("{}▏", editing.text),
+                Some(editing) if editing.target == Target::Key(index) => {
+                    format!("{}▏", editing.text)
+                }
                 _ => app.value_text(index),
             };
-            let style = if app.editing.as_ref().map(|e| e.row) == Some(index) {
+            let style = if matches!(&app.editing, Some(editing) if editing.target == Target::Key(index)) {
                 Style::default().fg(ACCENT)
             } else {
                 Style::default()
@@ -157,6 +170,50 @@ fn draw_keys(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let mut state = TableState::default();
     if !app.keys.is_empty() {
         state.select(Some(app.selected.min(app.keys.len() - 1)));
+    }
+    frame.render_stateful_widget(table, area, &mut state);
+}
+
+fn draw_remap(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let focused = app.pane == Pane::Remap;
+    let border = if focused { ACCENT } else { Color::DarkGray };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border))
+        .title(" remap (map.btn_map → button index) ");
+
+    let slots = app.remap_len();
+    let rows: Vec<Row> = (0..slots)
+        .map(|slot| {
+            let shown = match &app.editing {
+                Some(editing) if editing.target == Target::Remap(slot) => {
+                    format!("{}▏", editing.text)
+                }
+                _ => app.remap_text(slot),
+            };
+            Row::new(vec![
+                Cell::from(format!("input {slot:02}")),
+                Cell::from("→").style(Style::default().fg(MUTED)),
+                Cell::from(shown),
+            ])
+        })
+        .collect();
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(12),
+            Constraint::Length(3),
+            Constraint::Min(8),
+        ],
+    )
+    .header(Row::new(vec!["input", "", "feeds"]).style(Style::default().fg(MUTED)))
+    .block(block)
+    .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+
+    let mut state = TableState::default();
+    if slots > 0 {
+        state.select(Some(app.remap_selected.min(slots - 1)));
     }
     frame.render_stateful_widget(table, area, &mut state);
 }

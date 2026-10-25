@@ -47,12 +47,22 @@ pub struct Restored {
 pub enum Pane {
     Sources,
     Keys,
+    Remap,
     Profiles,
+}
+
+/// What a typed value belongs to.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    /// One key of the configuration, by its row.
+    Key(usize),
+    /// One slot of the remap table, by its position.
+    Remap(usize),
 }
 
 /// A value being typed.
 pub struct Editing {
-    pub row: usize,
+    pub target: Target,
     pub text: String,
 }
 
@@ -70,6 +80,8 @@ pub struct App {
     pub values: BTreeMap<String, Value>,
     pub selected: usize,
     pub editing: Option<Editing>,
+
+    pub remap_selected: usize,
 
     pub profiles: Vec<ProfileEntry>,
     pub profile_selected: usize,
@@ -93,6 +105,7 @@ impl App {
             values: BTreeMap::new(),
             selected: 0,
             editing: None,
+            remap_selected: 0,
             profiles: Vec::new(),
             profile_selected: 0,
             snapshot: None,
@@ -171,6 +184,9 @@ impl App {
         if self.selected >= self.keys.len() {
             self.selected = self.keys.len().saturating_sub(1);
         }
+        if self.remap_selected >= self.remap_len() {
+            self.remap_selected = self.remap_len().saturating_sub(1);
+        }
         if self.profile_selected >= self.profiles.len() {
             self.profile_selected = self.profiles.len().saturating_sub(1);
         }
@@ -200,6 +216,35 @@ impl App {
         self.refresh()
     }
 
+    /// The key the remap table is carried in, when the device declares one.
+    pub fn remap_key(&self) -> Option<&Key> {
+        self.keys
+            .iter()
+            .find(|key| key.name == "map.btn_map" && matches!(key.kind, KeyType::U8Array))
+    }
+
+    /// The slots the remap table holds.
+    pub fn remap_values(&self) -> Vec<i32> {
+        match self.values.get("map.btn_map") {
+            Some(Value::Array(values)) => values.clone(),
+            _ => Vec::new(),
+        }
+    }
+
+    pub fn remap_len(&self) -> usize {
+        self.remap_key()
+            .map(|key| key.count as usize)
+            .unwrap_or(0)
+    }
+
+    /// The target one input slot feeds, as the table carries it.
+    pub fn remap_text(&self, slot: usize) -> String {
+        match self.remap_values().get(slot) {
+            Some(value) => value.to_string(),
+            None => String::new(),
+        }
+    }
+
     /// The text a value is edited in: a number, or a run of them.
     pub fn value_text(&self, row: usize) -> String {
         let Some(key) = self.keys.get(row) else {
@@ -217,14 +262,28 @@ impl App {
     }
 
     pub fn begin_edit(&mut self) {
-        let row = self.selected;
-        if row >= self.keys.len() {
-            return;
+        match self.pane {
+            Pane::Remap => {
+                let slot = self.remap_selected;
+                if slot >= self.remap_len() {
+                    return;
+                }
+                self.editing = Some(Editing {
+                    target: Target::Remap(slot),
+                    text: self.remap_text(slot),
+                });
+            }
+            _ => {
+                let row = self.selected;
+                if row >= self.keys.len() {
+                    return;
+                }
+                self.editing = Some(Editing {
+                    target: Target::Key(row),
+                    text: self.value_text(row),
+                });
+            }
         }
-        self.editing = Some(Editing {
-            row,
-            text: self.value_text(row),
-        });
     }
 
     pub fn edit_push(&mut self, character: char) {
@@ -248,7 +307,34 @@ impl App {
         let Some(editing) = self.editing.take() else {
             return Ok(());
         };
-        let Some(key) = self.keys.get(editing.row).cloned() else {
+
+        // A slot of the remap table is written as the whole table, with the one
+        // slot replaced: the device holds a run, not an element.
+        if let Target::Remap(slot) = editing.target {
+            let mut table = self.remap_values();
+            if slot >= table.len() {
+                return Err("the table carries no such slot".into());
+            }
+            table[slot] = editing
+                .text
+                .trim()
+                .parse::<i32>()
+                .map_err(|_| format!("{}: not a number", editing.text.trim()))?;
+            let answer = self.call(
+                "session.set_key",
+                json!({ "key": "map.btn_map", "value": Value::Array(table.clone()) }),
+            )?;
+            let written: Value =
+                serde_json::from_value(answer).map_err(|error| error.to_string())?;
+            self.values.insert("map.btn_map".into(), written);
+            self.message = format!("slot {slot} feeds {}", table[slot]);
+            return Ok(());
+        }
+
+        let Target::Key(row) = editing.target else {
+            return Ok(());
+        };
+        let Some(key) = self.keys.get(row).cloned() else {
             return Ok(());
         };
 
@@ -473,6 +559,26 @@ mod tests {
         app.begin_edit();
         app.editing.as_mut().expect("an edit").text = "9999".into();
         assert!(app.commit_edit().is_err(), "a value out of range is refused");
+    }
+
+    #[test]
+    fn a_remap_slot_is_written_as_the_table_it_sits_in() {
+        let mut app = App::at(daemon_on_sim());
+        app.refresh().expect("a state");
+        let key = app.remap_key().expect("the table the device declares");
+        assert!(key.count > 0);
+
+        app.pane = Pane::Remap;
+        app.remap_selected = 2;
+        app.begin_edit();
+        app.editing.as_mut().expect("an edit").text = "9".into();
+        app.commit_edit().expect("a slot the key holds");
+
+        let table = app.remap_values();
+        assert_eq!(table.get(2), Some(&9));
+        app.begin_edit();
+        app.editing.as_mut().expect("an edit").text = "999".into();
+        assert!(app.commit_edit().is_err(), "a slot out of range is refused");
     }
 
     #[test]
