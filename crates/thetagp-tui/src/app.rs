@@ -618,7 +618,8 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect();
         assert!(drawn.contains("BoringTechH743"), "the board is named");
-        assert!(drawn.contains("led.bri"), "the keys it declares are shown");
+        assert!(drawn.contains("LED Brightness"), "the key is named readably");
+        assert!(drawn.contains("led.bri"), "the key's own name is shown beside it");
     }
 
     #[test]

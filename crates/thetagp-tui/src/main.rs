@@ -4,6 +4,7 @@
 //! to it; this program is a client of that socket and of nothing else.
 
 mod app;
+mod labels;
 mod ui;
 
 use std::io;

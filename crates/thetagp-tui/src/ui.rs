@@ -11,6 +11,7 @@ use ratatui::widgets::{
 use thetagp_client::KeyType;
 
 use crate::app::{App, Pane, Target};
+use crate::labels;
 
 const ACCENT: Color = Color::Rgb(90, 156, 255);
 const MUTED: Color = Color::Rgb(139, 146, 156);
@@ -18,14 +19,14 @@ const MUTED: Color = Color::Rgb(139, 146, 156);
 pub fn draw(frame: &mut Frame, app: &App) {
     let mut constraints = vec![
         Constraint::Length(3), // header
-        Constraint::Length(5), // sources
-        Constraint::Min(8),    // keys
+        Constraint::Length(4), // sources
+        Constraint::Min(9),    // keys
     ];
     let has_remap = app.remap_len() > 0;
     if has_remap {
         constraints.push(Constraint::Length(10));
     }
-    constraints.push(Constraint::Length(6)); // profiles
+    constraints.push(Constraint::Length(5)); // profiles
     constraints.push(Constraint::Length(3)); // status
 
     let areas = Layout::default()
@@ -131,8 +132,18 @@ fn draw_keys(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             } else {
                 Style::default()
             };
+            let named = match labels::label(&key.name) {
+                Some(label) => Line::from(vec![
+                    Span::raw(label.to_string()),
+                    Span::styled(format!(" ({})", key.name), Style::default().fg(Color::DarkGray)),
+                ]),
+                None => Line::from(Span::styled(
+                    key.name.clone(),
+                    Style::default().fg(Color::DarkGray),
+                )),
+            };
             Row::new(vec![
-                Cell::from(key.name.clone()),
+                Cell::from(named),
                 Cell::from(format!(
                     "{:?}{}",
                     key.kind,
@@ -154,7 +165,7 @@ fn draw_keys(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let table = Table::new(
         rows,
         [
-            Constraint::Length(18),
+            Constraint::Min(32),
             Constraint::Length(14),
             Constraint::Length(12),
             Constraint::Min(12),
@@ -162,7 +173,7 @@ fn draw_keys(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ],
     )
     .header(
-        Row::new(vec!["key", "shape", "range", "value", ""]).style(Style::default().fg(MUTED)),
+        Row::new(vec!["name", "shape", "range", "value", ""]).style(Style::default().fg(MUTED)),
     )
     .block(block)
     .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
