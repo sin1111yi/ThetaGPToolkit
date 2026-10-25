@@ -260,6 +260,21 @@ mod tests {
     }
 
     #[test]
+    fn a_saved_value_is_the_one_the_device_keeps() {
+        let mut device = Device::at(daemon_on_sim());
+        device.connect(SIMULATED).expect("the device answers");
+        device
+            .set_key("led.bri", &Value::Scalar(77))
+            .expect("a value the key holds");
+        let saved = device.save().expect("a save");
+        assert!(saved.persisted, "the device wrote the configuration");
+
+        device.load().expect("the stored configuration is read back");
+        let config = device.config().expect("the configuration");
+        assert_eq!(config.get("led.bri"), Some(&Value::Scalar(77)));
+    }
+
+    #[test]
     fn closing_the_connection_leaves_nothing_readable() {
         let mut device = Device::at(daemon_on_sim());
         device.connect(SIMULATED).expect("the device answers");

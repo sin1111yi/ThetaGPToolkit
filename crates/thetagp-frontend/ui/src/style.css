@@ -92,3 +92,33 @@ p#error {
   color: #ff8f8f;
   min-height: 1.2em;
 }
+
+#tools {
+  gap: 8px;
+}
+
+input[type="number"],
+input[type="text"] {
+  font: inherit;
+  color: inherit;
+  background: #1e2228;
+  border: 1px solid #2c313a;
+  border-radius: 6px;
+  padding: 4px 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+input:focus {
+  outline: none;
+  border-color: #4a5563;
+}
+
+td.note {
+  color: #8b929c;
+  white-space: nowrap;
+}
+
+td.note:not(:empty) {
+  color: #b8c0cc;
+}
