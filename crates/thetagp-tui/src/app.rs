@@ -41,6 +41,7 @@ pub struct Restored {
     pub profiles_written: usize,
     pub keys_unknown: Vec<String>,
     pub keys_refused: Vec<String>,
+    pub profiles_refused: Vec<u32>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -468,15 +469,22 @@ impl App {
             .chain(restored.keys_refused.iter())
             .cloned()
             .collect::<Vec<_>>();
+        let profiles = if restored.profiles_refused.is_empty() {
+            String::new()
+        } else {
+            format!("; profiles refused: {:?}", restored.profiles_refused)
+        };
         self.message = format!(
-            "restored {} values, {} profiles{}",
+            "restored {} values, {} profiles{}{}{}",
             restored.values_written,
             restored.profiles_written,
+            profiles,
             if refused.is_empty() {
                 String::new()
             } else {
                 format!("; not taken: {}", refused.join(", "))
-            }
+            },
+            ""
         );
         self.refresh()
     }

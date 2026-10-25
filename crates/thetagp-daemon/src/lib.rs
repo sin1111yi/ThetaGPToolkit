@@ -214,6 +214,7 @@ impl Service {
                         "profiles_written": restored.profiles_written,
                         "keys_unknown": restored.keys_unknown,
                         "keys_refused": restored.keys_refused,
+                        "profiles_refused": restored.profiles_refused,
                     }))
                 })
             })(),

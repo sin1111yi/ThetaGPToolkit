@@ -40,6 +40,8 @@ pub struct Restored {
     pub keys_unknown: Vec<String>,
     /// Keys the device declares and the value does not fit.
     pub keys_refused: Vec<String>,
+    /// Profiles the snapshot carries and the device would not take.
+    pub profiles_refused: Vec<u32>,
 }
 
 impl Snapshot {
@@ -90,8 +92,18 @@ impl Snapshot {
         }
 
         for profile in &self.profiles {
-            session.profile_put(profile.id, profile.body.as_bytes())?;
-            restored.profiles_written += 1;
+            // Profile 0 is the board's own factory baseline: the store refuses
+            // to write it, and a snapshot restores what a user set, not what the
+            // firmware shipped.
+            if profile.id == 0 {
+                continue;
+            }
+            match session.profile_put(profile.id, profile.body.as_bytes()) {
+                Ok(_) => restored.profiles_written += 1,
+                // One profile the device would not take does not stop the rest:
+                // the report names it and the write goes on.
+                Err(_) => restored.profiles_refused.push(profile.id),
+            }
         }
 
         Ok(restored)

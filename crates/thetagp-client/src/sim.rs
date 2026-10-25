@@ -199,6 +199,14 @@ pub fn device() -> SimulatedDevice {
         match kind {
             // ── a body on its way to the store ──
             proto::request::Kind::ProfileStart(arm) => {
+                // The store refuses the factory profile, as the firmware does:
+                // it is the board's own baseline and a write would replace it.
+                if arm.id == 0 {
+                    return refused(
+                        proto::ErrorCode::ErrInternal,
+                        proto::Reason::ProfileWriteFailed,
+                    );
+                }
                 store.borrow_mut().begin(Some(arm.id), arm.total as usize);
                 Vec::new()
             }

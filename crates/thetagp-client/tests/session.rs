@@ -3,6 +3,7 @@
 
 use std::time::Duration;
 
+use thetagp_client::backup::{Snapshot, StoredProfile};
 use thetagp_client::sim::{SimulatedDevice, numbered};
 use thetagp_client::{Session, SessionError, proto};
 
@@ -270,4 +271,35 @@ fn a_body_the_store_refuses_is_reported() {
         }
         other => panic!("{other}"),
     }
+}
+
+#[test]
+fn a_snapshot_does_not_write_the_factory_profile() {
+    let mut session = profiles_session();
+    let body = a_body(64);
+    let id = session.profile_put(1, &body).unwrap();
+
+    let snapshot = Snapshot {
+        board: "test".to_string(),
+        version: "1".to_string(),
+        config: Default::default(),
+        profiles: vec![
+            StoredProfile {
+                id: 0,
+                body: "{}".to_string(),
+            },
+            StoredProfile {
+                id,
+                body: String::from_utf8(body).unwrap(),
+            },
+        ],
+    };
+
+    let restored = snapshot.restore(&mut session).expect("the snapshot restores");
+    assert_eq!(restored.profiles_written, 1, "the user's profile is written");
+    assert!(
+        restored.profiles_refused.is_empty(),
+        "the factory profile is skipped, not refused: {:?}",
+        restored.profiles_refused
+    );
 }
