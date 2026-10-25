@@ -29,6 +29,14 @@ type Identity = {
 
 type ConnState = { source: string | null };
 type Saved = { persisted: boolean; dropped_keys: number | null };
+type ProfileEntry = { id: number; active: boolean };
+type Profiles = { active: number; profiles: ProfileEntry[] };
+type Restored = {
+  values_written: number;
+  profiles_written: number;
+  keys_unknown: string[];
+  keys_refused: string[];
+};
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 app.innerHTML = `
@@ -49,6 +57,16 @@ app.innerHTML = `
     <span id="dirty" class="muted"></span>
   </section>
   <section id="panel"></section>
+  <section class="bar" id="profiles-bar" hidden>
+    <strong>profiles</strong>
+    <button id="take-snapshot" class="quiet">take snapshot</button>
+    <span id="snapshot-note" class="muted"></span>
+  </section>
+  <section id="profiles"></section>
+  <section id="snapshot-panel" hidden>
+    <textarea id="snapshot-text" spellcheck="false"></textarea>
+    <button id="restore">restore</button>
+  </section>
   <p id="error"></p>
 `;
 
@@ -60,17 +78,22 @@ const panel = byId("panel");
 const error = byId("error");
 const tools = byId("tools");
 const dirty = byId("dirty");
+const profilesBar = byId("profiles-bar");
+const profilesBox = byId("profiles");
+const snapshotPanel = byId("snapshot-panel");
+const snapshotText = byId<HTMLTextAreaElement>("snapshot-text");
+const snapshotNote = byId("snapshot-note");
 
 let keys: Key[] = [];
 let values: Record<string, Value> = {};
-let pending = new Set<string>();
+let unsaved = new Set<string>();
 
 function report(failure: unknown) {
   error.textContent = failure === null || failure === undefined ? "" : String(failure);
 }
 
-function showDirty() {
-  dirty.textContent = pending.size === 0 ? "" : `${pending.size} not saved`;
+function showUnsaved() {
+  dirty.textContent = unsaved.size === 0 ? "" : `${unsaved.size} not saved`;
 }
 
 async function listSources() {
@@ -83,7 +106,7 @@ async function listSources() {
     option.textContent = name;
     source.append(option);
   }
-  source.value = sources.includes(chosen) ? chosen : sources[0] ?? "";
+  source.value = sources.includes(chosen) ? chosen : (sources[0] ?? "");
 }
 
 function parseValue(key: Key, raw: string): Value {
@@ -135,9 +158,9 @@ function renderKey(key: Key): HTMLTableRowElement {
       const next = parseValue(key, input.value);
       await invoke<Value>("set_key", { key: key.name, value: next });
       values[key.name] = next;
-      pending.add(key.name);
+      unsaved.add(key.name);
       note.textContent = "written";
-      showDirty();
+      showUnsaved();
     } catch (failure) {
       note.textContent = String(failure);
     }
@@ -167,14 +190,70 @@ function renderKeys() {
   panel.replaceChildren(table);
 }
 
+async function refreshProfiles() {
+  const listed = await invoke<Profiles>("profiles");
+  profilesBox.replaceChildren();
+  for (const entry of listed.profiles) {
+    const row = document.createElement("div");
+    row.className = "profile";
+    const name = document.createElement("span");
+    name.textContent = `#${entry.id}${entry.active ? " · active" : ""}`;
+    row.append(name);
+    if (!entry.active) {
+      const button = document.createElement("button");
+      button.className = "quiet";
+      button.textContent = "activate";
+      button.addEventListener(
+        "click",
+        guard(async () => {
+          await invoke<number>("select_profile", { id: entry.id });
+          await refreshProfiles();
+          snapshotNote.textContent = `#${entry.id} is the profile the device runs from`;
+        }),
+      );
+      row.append(button);
+    }
+    profilesBox.append(row);
+  }
+  if (listed.profiles.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "this device carries no user profiles";
+    profilesBox.append(empty);
+  }
+  profilesBar.hidden = false;
+}
+
+async function takeSnapshot() {
+  snapshotText.value = await invoke<string>("snapshot");
+  snapshotPanel.hidden = false;
+  snapshotNote.textContent = "the snapshot is in the box below";
+}
+
+async function restoreSnapshot() {
+  const report = await invoke<Restored>("restore", { snapshot: snapshotText.value });
+  const refused = [...report.keys_unknown, ...report.keys_refused];
+  snapshotNote.textContent =
+    `wrote ${report.values_written} values and ${report.profiles_written} profiles` +
+    (refused.length === 0 ? "" : `; not taken: ${refused.join(", ")}`);
+  await refreshProfiles();
+  values = await invoke<Record<string, Value>>("config");
+  unsaved.clear();
+  showUnsaved();
+  renderKeys();
+}
+
 async function showConnection() {
   const current = await invoke<ConnState>("state");
   state.textContent = current.source ? `connected · ${current.source}` : "disconnected";
   identity.innerHTML = "";
   panel.innerHTML = "";
+  profilesBox.replaceChildren();
   tools.hidden = true;
-  pending.clear();
-  showDirty();
+  profilesBar.hidden = true;
+  snapshotPanel.hidden = true;
+  unsaved.clear();
+  showUnsaved();
   if (!current.source) {
     return;
   }
@@ -190,12 +269,13 @@ async function showConnection() {
   values = await invoke<Record<string, Value>>("config");
   renderKeys();
   tools.hidden = false;
+  await refreshProfiles();
 }
 
 async function saveConfiguration() {
   const saved = await invoke<Saved>("save");
-  pending.clear();
-  showDirty();
+  unsaved.clear();
+  showUnsaved();
   const dropped = saved.dropped_keys ?? 0;
   error.textContent = saved.persisted
     ? dropped === 0
@@ -207,8 +287,8 @@ async function saveConfiguration() {
 async function reloadConfiguration() {
   await invoke("load");
   values = await invoke<Record<string, Value>>("config");
-  pending.clear();
-  showDirty();
+  unsaved.clear();
+  showUnsaved();
   renderKeys();
 }
 
@@ -236,6 +316,8 @@ byId("disconnect").addEventListener(
 );
 byId("save").addEventListener("click", guard(saveConfiguration));
 byId("reload").addEventListener("click", guard(reloadConfiguration));
+byId("take-snapshot").addEventListener("click", guard(takeSnapshot));
+byId("restore").addEventListener("click", guard(restoreSnapshot));
 
 guard(async () => {
   await listSources();

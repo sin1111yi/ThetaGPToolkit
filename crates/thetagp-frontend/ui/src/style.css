@@ -122,3 +122,41 @@ td.note {
 td.note:not(:empty) {
   color: #b8c0cc;
 }
+
+#profiles-bar {
+  gap: 12px;
+}
+
+.profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+#snapshot-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+#snapshot-panel[hidden] {
+  display: none;
+}
+
+textarea {
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: inherit;
+  background: #1e2228;
+  border: 1px solid #2c313a;
+  border-radius: 6px;
+  padding: 8px;
+  min-height: 180px;
+  resize: vertical;
+}
+
+textarea:focus {
+  outline: none;
+  border-color: #4a5563;
+}

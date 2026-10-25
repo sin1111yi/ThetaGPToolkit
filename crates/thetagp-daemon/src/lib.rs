@@ -168,6 +168,51 @@ impl Service {
                     "dropped_keys": saved.dropped_keys,
                 }))
             }),
+            "session.profiles" => self.with(|session| {
+                let listed = session.profiles().map_err(|error| error.to_string())?;
+                let profiles: Vec<Json> = listed
+                    .profiles
+                    .iter()
+                    .map(|entry| json!({ "id": entry.id, "active": entry.active }))
+                    .collect();
+                Ok(json!({ "active": listed.active, "profiles": profiles }))
+            }),
+            "session.select" => (|| {
+                let id = request
+                    .pointer("/params/id")
+                    .and_then(Json::as_u64)
+                    .ok_or(("no profile was named".to_string(), -32602))?;
+                self.with(|session| {
+                    let selected = session
+                        .profile_select(id as u32)
+                        .map_err(|error| error.to_string())?;
+                    Ok(json!({ "active": selected.id }))
+                })
+            })(),
+            "session.snapshot" => self.with(|session| {
+                let snapshot =
+                    thetagp_client::Snapshot::take(session).map_err(|error| error.to_string())?;
+                let text = snapshot.to_json().map_err(|error| error.to_string())?;
+                Ok(json!(text))
+            }),
+            "session.restore" => (|| {
+                let text = request
+                    .pointer("/params/snapshot")
+                    .and_then(Json::as_str)
+                    .ok_or(("no snapshot was carried".to_string(), -32602))?;
+                let snapshot = thetagp_client::Snapshot::from_json(text).map_err(|error| {
+                    (format!("the snapshot did not read: {error}"), -32602)
+                })?;
+                self.with(|session| {
+                    let restored = snapshot.restore(session).map_err(|error| error.to_string())?;
+                    Ok(json!({
+                        "values_written": restored.values_written,
+                        "profiles_written": restored.profiles_written,
+                        "keys_unknown": restored.keys_unknown,
+                        "keys_refused": restored.keys_refused,
+                    }))
+                })
+            })(),
             "session.load" => self.with(|session| {
                 session.config_load().map_err(|error| error.to_string())?;
                 Ok(json!({}))

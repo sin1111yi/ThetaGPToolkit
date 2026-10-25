@@ -42,6 +42,29 @@ pub struct Saved {
     pub dropped_keys: Option<u32>,
 }
 
+/// One profile the store carries.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProfileEntry {
+    pub id: u32,
+    pub active: bool,
+}
+
+/// The profiles the store carries, and the one the device runs from.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Profiles {
+    pub active: u32,
+    pub profiles: Vec<ProfileEntry>,
+}
+
+/// What a restore wrote, and what the target would not take.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Restored {
+    pub values_written: usize,
+    pub profiles_written: usize,
+    pub keys_unknown: Vec<String>,
+    pub keys_refused: Vec<String>,
+}
+
 /// The daemon this window asks, attached when the first question is put to it.
 pub struct Device {
     client: Option<Client>,
@@ -126,6 +149,37 @@ impl Device {
     pub fn load(&mut self) -> Result<(), String> {
         self.call("session.load", json!({}))?;
         Ok(())
+    }
+
+    /// The profiles the store carries, and the one in effect.
+    pub fn profiles(&mut self) -> Result<Profiles, String> {
+        let answer = self.call("session.profiles", json!({}))?;
+        serde_json::from_value(answer).map_err(|error| error.to_string())
+    }
+
+    /// Makes a profile the one the device runs from.
+    pub fn select_profile(&mut self, id: u32) -> Result<u32, String> {
+        let answer = self.call("session.select", json!({ "id": id }))?;
+        answer
+            .get("active")
+            .and_then(Json::as_u64)
+            .map(|active| active as u32)
+            .ok_or_else(|| "the device named no profile".to_string())
+    }
+
+    /// The whole of what the device is set to, as the text a file carries.
+    pub fn snapshot(&mut self) -> Result<String, String> {
+        let answer = self.call("session.snapshot", json!({}))?;
+        answer
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| "the device answered no snapshot".to_string())
+    }
+
+    /// Writes a snapshot's settings onto the device, holding each to its keys.
+    pub fn restore(&mut self, snapshot: &str) -> Result<Restored, String> {
+        let answer = self.call("session.restore", json!({ "snapshot": snapshot }))?;
+        serde_json::from_value(answer).map_err(|error| error.to_string())
     }
 
     fn call(&mut self, method: &str, params: Json) -> Result<Json, String> {
@@ -272,6 +326,24 @@ mod tests {
         device.load().expect("the stored configuration is read back");
         let config = device.config().expect("the configuration");
         assert_eq!(config.get("led.bri"), Some(&Value::Scalar(77)));
+    }
+
+    #[test]
+    fn a_snapshot_is_the_whole_of_what_the_device_holds() {
+        let mut device = Device::at(daemon_on_sim());
+        device.connect(SIMULATED).expect("the device answers");
+
+        let profiles = device.profiles().expect("the profiles it carries");
+        // The simulated store starts empty, so the list is held to what it does
+        // carry: the entry flagged active is the id the reply names.
+        for entry in &profiles.profiles {
+            assert_eq!(entry.active, entry.id == profiles.active);
+        }
+
+        let text = device.snapshot().expect("a snapshot");
+        let parsed =
+            thetagp_client::Snapshot::from_json(&text).expect("the snapshot reads back");
+        assert!(!parsed.config.is_empty());
     }
 
     #[test]

@@ -11,7 +11,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use tauri::State;
 
-use device::{ConnState, Device, Identity, Saved};
+use device::{ConnState, Device, Identity, Profiles, Restored, Saved};
 use thetagp_client::{Key, Value};
 
 /// The state, whether or not a command that failed left it poisoned: the
@@ -70,6 +70,26 @@ fn set_key(device: State<'_, Mutex<Device>>, key: String, value: Value) -> Resul
 }
 
 #[tauri::command]
+fn profiles(device: State<'_, Mutex<Device>>) -> Result<Profiles, String> {
+    held(&device).profiles()
+}
+
+#[tauri::command]
+fn select_profile(device: State<'_, Mutex<Device>>, id: u32) -> Result<u32, String> {
+    held(&device).select_profile(id)
+}
+
+#[tauri::command]
+fn snapshot(device: State<'_, Mutex<Device>>) -> Result<String, String> {
+    held(&device).snapshot()
+}
+
+#[tauri::command]
+fn restore(device: State<'_, Mutex<Device>>, snapshot: String) -> Result<Restored, String> {
+    held(&device).restore(&snapshot)
+}
+
+#[tauri::command]
 fn save(device: State<'_, Mutex<Device>>) -> Result<Saved, String> {
     held(&device).save()
 }
@@ -83,7 +103,20 @@ fn main() {
     tauri::Builder::default()
         .manage(Mutex::new(Device::new()))
         .invoke_handler(tauri::generate_handler![
-            state, ports, connect, disconnect, identity, keys, config, set_key, save, load
+            state,
+            ports,
+            connect,
+            disconnect,
+            identity,
+            keys,
+            config,
+            set_key,
+            save,
+            load,
+            profiles,
+            select_profile,
+            snapshot,
+            restore
         ])
         .run(tauri::generate_context!())
         .expect("the window runs");
