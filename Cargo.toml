@@ -2,9 +2,13 @@
 resolver = "2"
 members = [
     "crates/thetagp-client",
+    "crates/thetagp-daemon",
+    "crates/thetagp-ipc",
     "crates/thetagp-mcp",
     "crates/thetagp-proto",
+    "crates/thetagp-tools",
     "crates/thetagp-wire",
+    "crates/thetagp-frontend/src-tauri",
 ]
 
 [workspace.package]
@@ -21,6 +25,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serialport = "4"
 thetagp-client = { path = "crates/thetagp-client" }
+thetagp-ipc = { path = "crates/thetagp-ipc" }
 thetagp-mcp = { path = "crates/thetagp-mcp" }
+thetagp-tools = { path = "crates/thetagp-tools" }
 thetagp-proto = { path = "crates/thetagp-proto" }
 thetagp-wire = { path = "crates/thetagp-wire" }

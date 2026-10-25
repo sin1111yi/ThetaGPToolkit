@@ -1,9 +1,9 @@
 //! The ThetaGP device, as tools a model can call.
 //!
-//! The backend is `thetagp-client`, a library this server calls in its own
-//! process; nothing here goes through a command line. The protocol half is the
-//! JSON-RPC a model host speaks over stdio; the tools are the device's own
-//! commands and the protocol's.
+//! The tools are executed by `thetagp-tools`, which the daemon runs: this crate
+//! is the MCP half, the JSON-RPC a model host speaks over stdio, and it passes a
+//! call to the daemon and the answer back. `Backend` is what keeps the two
+//! shapes -- the device in this process and the daemon that owns it -- the same
+//! to everything above them.
 
 pub mod protocol;
-pub mod tools;

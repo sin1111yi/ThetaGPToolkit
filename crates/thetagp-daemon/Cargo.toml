@@ -1,0 +1,22 @@
+[package]
+name = "thetagp-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "The one process that owns the device, and the tools a client asks it for"
+
+[lib]
+name = "thetagp_daemon"
+path = "src/lib.rs"
+
+[[bin]]
+name = "thetagp-daemon"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+serde_json.workspace = true
+thetagp-client.workspace = true
+thetagp-ipc.workspace = true
+thetagp-tools.workspace = true

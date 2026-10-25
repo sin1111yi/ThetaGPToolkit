@@ -1,0 +1,17 @@
+[package]
+name = "thetagp-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "The device as the tools a caller asks it for: the one place a tool is executed"
+
+[lib]
+name = "thetagp_tools"
+path = "src/lib.rs"
+
+[dependencies]
+serde_json.workspace = true
+thetagp-client.workspace = true
+thetagp-proto.workspace = true
+thetagp-wire.workspace = true

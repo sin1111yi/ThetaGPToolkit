@@ -1,8 +1,9 @@
-//! The server: the device's client, on the standard streams.
+//! The server: the daemon's tools, on the standard streams.
 //!
-//! It carries one connection and answers one message at a time, because the
-//! device does: a tool call is a request and its reply, and the next message
-//! waits for it.
+//! The device is held by one process, so this server reaches it rather than the
+//! port: the daemon's socket carries the calls, and the answers are passed back
+//! as they are. A client that finds no daemon starts the one beside this binary,
+//! so a host that only knows the MCP server still finds the device.
 
 use std::io::{BufRead, Write};
 use std::process::ExitCode;
@@ -10,8 +11,6 @@ use std::time::Duration;
 
 use clap::Parser;
 use serde_json::{Value as Json, json};
-
-use thetagp_client::{SerialTransport, Session, Transport, sim};
 
 #[derive(Parser)]
 #[command(
@@ -35,13 +34,27 @@ struct Cli {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let mut session = match open(&cli) {
-        Ok(session) => session,
+    let mut backend = match daemon(&cli) {
+        Ok(client) => client,
         Err(error) => {
             eprintln!("thetagp-mcp: {error}");
             return ExitCode::FAILURE;
         }
     };
+
+    // The daemon owns the connection; a flag this server was given is put to it
+    // rather than taken as a reason not to start.
+    let source = if cli.simulated {
+        Some(thetagp_daemon::SIMULATED)
+    } else {
+        cli.port.as_deref()
+    };
+    if let Err(error) = backend.call(
+        "session.connect",
+        json!({ "source": source }),
+    ) {
+        eprintln!("thetagp-mcp: no device is connected: {error}");
+    }
 
     let stdin = std::io::stdin();
     let mut out = std::io::stdout();
@@ -52,7 +65,7 @@ fn main() -> ExitCode {
         }
 
         let answer = match serde_json::from_str::<Json>(&line) {
-            Ok(request) => thetagp_mcp::protocol::handle(&mut session, &request),
+            Ok(request) => thetagp_mcp::protocol::handle(&mut backend, &request),
             Err(error) => Some(json!({
                 "jsonrpc": "2.0",
                 "id": null,
@@ -68,40 +81,45 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// The connection the tools are answered over.
-fn open(cli: &Cli) -> Result<Session<Box<dyn Transport>>, Box<dyn std::error::Error>> {
-    let timeout = Duration::from_millis(cli.timeout);
-
-    if cli.simulated {
-        return Ok(Session::new(Box::new(sim::device()), timeout));
+/// The daemon that owns the device, started beside this binary when none runs.
+fn daemon(cli: &Cli) -> Result<thetagp_ipc::Client, Box<dyn std::error::Error>> {
+    if let Ok(client) = thetagp_ipc::Client::connect() {
+        return Ok(client);
     }
 
-    let port = match &cli.port {
-        Some(port) => port.clone(),
-        None => {
-            // The ports are asked rather than guessed at: a port that answers is
-            // a device, and one that does not is only a port.
-            let mut found = None;
-            for candidate in
-                thetagp_client::transport::available_ports().map_err(|error| error.to_string())?
-            {
-                let Ok(transport) = SerialTransport::open(&candidate) else {
-                    continue;
-                };
-                let mut probe = Session::new(
-                    Box::new(transport) as Box<dyn Transport>,
-                    Duration::from_millis(250),
-                );
-                if probe.ping().is_ok() {
-                    eprintln!("thetagp-mcp: {candidate} answers");
-                    found = Some(candidate);
-                    break;
-                }
-            }
-            found.ok_or("no port answered as a ThetaGP; name one with --port")?
-        }
+    let name = if cfg!(windows) {
+        "thetagp-daemon.exe"
+    } else {
+        "thetagp-daemon"
     };
+    let beside = std::env::current_exe()?.with_file_name(name);
+    let mut command = std::process::Command::new(&beside);
+    // The daemon outlives this server and must not hold the pipes it was
+    // started through: a reader of this server's output would wait for an end
+    // that never comes. Its own output goes nowhere here; run it by hand to
+    // read it.
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    command.arg("--timeout").arg(cli.timeout.to_string());
+    if cli.simulated {
+        command.arg("--simulated");
+    }
+    if let Some(port) = &cli.port {
+        command.arg("--port").arg(port);
+    }
+    command
+        .spawn()
+        .map_err(|error| format!("starting {}: {error}", beside.display()))?;
 
-    let transport = SerialTransport::open(&port).map_err(|error| format!("{port}: {error}"))?;
-    Ok(Session::new(Box::new(transport), timeout))
+    // The daemon records its endpoint once it has a connection; the caller
+    // waits for that rather than for a fixed delay.
+    for _ in 0..50 {
+        std::thread::sleep(Duration::from_millis(100));
+        if let Ok(client) = thetagp_ipc::Client::connect() {
+            return Ok(client);
+        }
+    }
+    Err("the daemon did not come up; run thetagp-daemon and read its output".into())
 }

@@ -16,8 +16,8 @@ path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
-serde.workspace = true
 serde_json.workspace = true
 thetagp-client.workspace = true
-thetagp-proto.workspace = true
-thetagp-wire.workspace = true
+thetagp-daemon = { path = "../thetagp-daemon" }
+thetagp-ipc.workspace = true
+thetagp-tools.workspace = true

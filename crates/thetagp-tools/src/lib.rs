@@ -38,6 +38,7 @@ pub fn catalogue() -> Json {
     let id = json!({ "type": "integer", "description": "The profile's id" });
     json!({ "tools": [
         tool("ping", "Whether a device is there and answering.", json!({}), &[]),
+        tool("ports", "Every serial port this machine carries, by the names they are opened with.", json!({}), &[]),
         tool("version", "What the firmware is: the board, the version and the build.", json!({}), &[]),
         tool("usage", "The device's own readings: load, memory, flash and profiles.", json!({}), &[]),
         tool("tasks", "What the scheduler's tasks are doing; one task when a tid is given.", json!({
@@ -149,6 +150,13 @@ pub fn call<T: Transport>(
         "ping" => {
             session.ping()?;
             text("the device answered")
+        }
+        "ports" => {
+            // The machine's ports, not the connection's: what a host may open
+            // rather than what it has open.
+            let ports = thetagp_client::transport::available_ports()
+                .map_err(|error| error.to_string())?;
+            text(serde_json::to_value(ports)?)
         }
         "version" => {
             let named = session.fw_version()?;

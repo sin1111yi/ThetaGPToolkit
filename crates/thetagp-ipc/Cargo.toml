@@ -1,0 +1,15 @@
+[package]
+name = "thetagp-ipc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "The link between the daemon that owns the device and the clients that ask it"
+
+[lib]
+name = "thetagp_ipc"
+path = "src/lib.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

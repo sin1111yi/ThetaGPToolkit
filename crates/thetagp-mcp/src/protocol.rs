@@ -3,18 +3,43 @@
 //! One message per line, as the stdio transport of the Model Context Protocol
 //! carries them: a request is answered with a result or an error, and a
 //! notification -- a message with no id -- is answered with nothing.
+//!
+//! The tools are executed by a backend: the device in this process, or the
+//! daemon that owns it. Either way the answers a host reads are the same.
 
 use serde_json::{Value as Json, json};
 
-use thetagp_client::{Session, Transport};
-
-use crate::tools;
+use thetagp_tools as tools;
 
 /// The protocol revision this server speaks.
 pub const REVISION: &str = "2024-11-05";
 
+/// What the tools are asked of.
+pub trait Backend {
+    fn call(&mut self, name: &str, arguments: &Json) -> Result<Json, Box<dyn std::error::Error>>;
+}
+
+/// The device in this process: the shape a test and a one-off run take.
+impl<T: thetagp_client::Transport> Backend for thetagp_client::Session<T> {
+    fn call(&mut self, name: &str, arguments: &Json) -> Result<Json, Box<dyn std::error::Error>> {
+        tools::call(self, name, arguments)
+    }
+}
+
+/// The daemon that owns the device: the shape a window and a model share.
+impl Backend for thetagp_ipc::Client {
+    fn call(&mut self, name: &str, arguments: &Json) -> Result<Json, Box<dyn std::error::Error>> {
+        thetagp_ipc::Client::call(
+            self,
+            "tools/call",
+            json!({ "name": name, "arguments": arguments }),
+        )
+        .map_err(|error| error.into())
+    }
+}
+
 /// The answer to one message, or `None` when it was a notification.
-pub fn handle<T: Transport>(session: &mut Session<T>, request: &Json) -> Option<Json> {
+pub fn handle<B: Backend>(backend: &mut B, request: &Json) -> Option<Json> {
     let id = request.get("id").cloned();
     // A message with no id is a notification: it is acted on, if it is one this
     // server acts on, and nothing is sent back for it.
@@ -42,7 +67,7 @@ pub fn handle<T: Transport>(session: &mut Session<T>, request: &Json) -> Option<
                 .pointer("/params/arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            match tools::call(session, name, &arguments) {
+            match backend.call(name, &arguments) {
                 Ok(result) => Ok(result),
                 // A tool that failed is an answer with the failure in it, not a
                 // protocol error: the model is meant to read it and decide.

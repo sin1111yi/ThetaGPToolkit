@@ -53,8 +53,21 @@ crates/
   thetagp-proto/    the messages, generated from the schema
   thetagp-client/   the exchange, and the device as a model of it:
                     transport, session, keys, config, backup, dynamic, sim
-  thetagp-mcp/      the device and the protocol, as tools a model can call
+  thetagp-tools/    the tools a caller asks the device for, and the one place
+                    each is executed
+  thetagp-ipc/      the local link: a JSON-RPC message per line, guarded by a
+                    token the daemon records beside its port
+  thetagp-daemon/   the one process that owns the device; it answers the tools
+                    and the window's typed calls over that link
+  thetagp-mcp/      the same tools, as the JSON-RPC a model host speaks over
+                    stdio: it passes each call to the daemon
+  thetagp-frontend/ the window: src-tauri/ asks the daemon, ui/ renders it
 ```
+
+A device is one port, so one process opens it: the daemon. Everything else --
+the window, the model's tools -- asks the daemon rather than the device. Start
+it by hand to read its log; the clients start one beside themselves when none
+is running.
 
 `thetagp-cli` is not here: a console is a tool of the MCP server and a panel of
 the frontend, and what was protocol in the drafted one lives in
