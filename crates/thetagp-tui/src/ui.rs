@@ -259,17 +259,19 @@ fn draw_profiles(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .profiles
         .iter()
         .map(|entry| {
-            let label = if entry.active {
-                format!("#{} · active", entry.id)
-            } else {
-                format!("#{}", entry.id)
-            };
-            let style = if entry.active {
-                Style::default().fg(ACCENT)
-            } else {
-                Style::default()
-            };
-            ListItem::new(label).style(style)
+            let mut spans = vec![Span::styled(format!("#{}", entry.id), Style::default())];
+            if entry.active {
+                spans.push(Span::styled(" · active", Style::default().fg(ACCENT)));
+            }
+            // The factory profile is the board's own: the store refuses a write
+            // to it, so the list says which one it is.
+            if entry.id == 0 {
+                spans.push(Span::styled(
+                    " (read-only)",
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+            ListItem::new(Line::from(spans))
         })
         .collect();
 
