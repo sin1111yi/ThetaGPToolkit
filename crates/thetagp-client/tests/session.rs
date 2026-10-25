@@ -224,16 +224,17 @@ fn a_profile_can_be_listed_selected_and_deleted() {
     let second = session.profile_put(2, &a_body(32)).unwrap();
 
     let listed = session.profiles().unwrap();
-    assert_eq!(listed.profiles.len(), 2);
+    // The store carries its factory profile 0 besides the two written here.
+    assert_eq!(listed.profiles.len(), 3);
 
     let selected = session.profile_select(second).unwrap();
     assert_eq!(selected.id, second);
 
     session.profile_delete(first).unwrap();
     let listed = session.profiles().unwrap();
-    assert_eq!(listed.profiles.len(), 1);
-    assert_eq!(listed.profiles[0].id, second);
-    assert!(listed.profiles[0].active);
+    assert_eq!(listed.profiles.len(), 2);
+    let active = listed.profiles.iter().find(|entry| entry.active).unwrap();
+    assert_eq!(active.id, second);
 }
 
 #[test]

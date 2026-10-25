@@ -135,13 +135,17 @@ fn a_snapshot_of_a_device_goes_onto_another() {
     let text = snapshot.to_json().unwrap();
     let carried = Snapshot::from_json(&text).unwrap();
     assert_eq!(carried.config, snapshot.config);
-    assert_eq!(carried.profiles.len(), 1);
+    // The store carries its factory profile besides the one written here.
+    assert_eq!(carried.profiles.len(), 2);
 
     // Onto a device that held something else.
     let mut second = session();
     let restored = carried.restore(&mut second).unwrap();
     assert_eq!(restored.values_written, carried.config.len());
-    assert_eq!(restored.profiles_written, 1);
+    assert_eq!(
+        restored.profiles_written, 1,
+        "the factory profile is left where it is"
+    );
     assert!(restored.keys_unknown.is_empty());
     assert!(restored.keys_refused.is_empty());
 

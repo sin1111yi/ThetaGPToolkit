@@ -139,6 +139,9 @@ fn handle(app: &mut App, code: KeyCode) -> bool {
         KeyCode::Char('d') => act(app, |app| app.disconnect()),
         KeyCode::Char('w') => act(app, |app| app.save()),
         KeyCode::Char('l') => act(app, |app| app.load()),
+        KeyCode::Char('n') => act(app, |app| app.create_profile()),
+        // The delete keeps its own pending state: the same key confirms it.
+        KeyCode::Char('x') => act_keeping_pending(app, |app| app.delete_profile()),
         KeyCode::Char('t') => act(app, |app| app.take_snapshot()),
         KeyCode::Char('r') => act(app, |app| app.restore_snapshot()),
         KeyCode::Char('R') => act(app, |app| app.refresh()),
@@ -148,6 +151,12 @@ fn handle(app: &mut App, code: KeyCode) -> bool {
 }
 
 fn act(app: &mut App, action: fn(&mut App) -> Result<(), String>) {
+    act_keeping_pending(app, action);
+    // A delete is confirmed by the same key twice: anything else drops it.
+    app.pending_delete = None;
+}
+
+fn act_keeping_pending(app: &mut App, action: fn(&mut App) -> Result<(), String>) {
     app.error = None;
     if let Err(error) = action(app) {
         app.error = Some(error);

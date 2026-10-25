@@ -108,6 +108,14 @@ impl Service {
             .and_then(Json::as_str)
             .unwrap_or_default();
 
+        // The parameters a method may carry, read once: the arms below answer
+        // with what they need and never reach back into the message.
+        let named_key = request.pointer("/params/key").and_then(Json::as_str);
+        let carried_value = request.pointer("/params/value").cloned();
+        let profile = request.pointer("/params/id").and_then(Json::as_u64);
+        let copied_from = request.pointer("/params/from").and_then(Json::as_u64);
+        let snapshot_text = request.pointer("/params/snapshot").and_then(Json::as_str);
+
         let reply: Result<Json, (String, i64)> = match method {
             "daemon.version" => Ok(json!({ "version": env!("CARGO_PKG_VERSION") })),
             "session.state" => Ok(self.state()),
@@ -139,28 +147,7 @@ impl Service {
                     thetagp_client::Config::read(session).map_err(|error| error.to_string())?;
                 Ok(json!(config.values()))
             }),
-            "session.set_key" => (|| {
-                let name = request
-                    .pointer("/params/key")
-                    .and_then(Json::as_str)
-                    .unwrap_or_default();
-                let carried = request
-                    .pointer("/params/value")
-                    .cloned()
-                    .ok_or(("no value was carried".to_string(), -32602))?;
-                let value: Value = serde_json::from_value(carried)
-                    .map_err(|error| (format!("the value did not read: {error}"), -32602))?;
-                self.with(|session| {
-                    let space = session.key_space().map_err(|error| error.to_string())?;
-                    space
-                        .check(name, &value)
-                        .map_err(|reject| reject.to_string())?;
-                    session
-                        .write_value(name, &value)
-                        .map_err(|error| error.to_string())?;
-                    Ok(json!(value))
-                })
-            })(),
+            "session.set_key" => self.set_key(named_key, carried_value),
             "session.save" => self.with(|session| {
                 let saved = session.config_save().map_err(|error| error.to_string())?;
                 Ok(json!({
@@ -181,43 +168,25 @@ impl Service {
                     .collect();
                 Ok(json!({ "active": listed.active, "profiles": profiles }))
             }),
-            "session.select" => (|| {
-                let id = request
-                    .pointer("/params/id")
-                    .and_then(Json::as_u64)
-                    .ok_or(("no profile was named".to_string(), -32602))?;
-                self.with(|session| {
-                    let selected = session
-                        .profile_select(id as u32)
-                        .map_err(|error| error.to_string())?;
-                    Ok(json!({ "active": selected.id }))
-                })
-            })(),
+            "session.select" => match profile {
+                Some(id) => self.select_profile(id),
+                None => Err(("no profile was named".to_string(), -32602)),
+            },
+            "session.profile_create" => self.create_profile(copied_from),
+            "session.profile_delete" => match profile {
+                Some(id) => self.delete_profile(id),
+                None => Err(("no profile was named".to_string(), -32602)),
+            },
             "session.snapshot" => self.with(|session| {
                 let snapshot =
                     thetagp_client::Snapshot::take(session).map_err(|error| error.to_string())?;
                 let text = snapshot.to_json().map_err(|error| error.to_string())?;
                 Ok(json!(text))
             }),
-            "session.restore" => (|| {
-                let text = request
-                    .pointer("/params/snapshot")
-                    .and_then(Json::as_str)
-                    .ok_or(("no snapshot was carried".to_string(), -32602))?;
-                let snapshot = thetagp_client::Snapshot::from_json(text).map_err(|error| {
-                    (format!("the snapshot did not read: {error}"), -32602)
-                })?;
-                self.with(|session| {
-                    let restored = snapshot.restore(session).map_err(|error| error.to_string())?;
-                    Ok(json!({
-                        "values_written": restored.values_written,
-                        "profiles_written": restored.profiles_written,
-                        "keys_unknown": restored.keys_unknown,
-                        "keys_refused": restored.keys_refused,
-                        "profiles_refused": restored.profiles_refused,
-                    }))
-                })
-            })(),
+            "session.restore" => match snapshot_text {
+                Some(text) => self.restore(text),
+                None => Err(("no snapshot was carried".to_string(), -32602)),
+            },
             "session.load" => self.with(|session| {
                 session.config_load().map_err(|error| error.to_string())?;
                 Ok(json!({}))
@@ -263,6 +232,86 @@ impl Service {
                 "id": id,
                 "error": { "code": code, "message": message },
             }),
+        })
+    }
+
+    /// Writes one value, held to the key the device declares.
+    fn set_key(
+        &self,
+        name: Option<&str>,
+        value: Option<Json>,
+    ) -> Result<Json, (String, i64)> {
+        let name = name.ok_or(("no key was named".to_string(), -32602))?;
+        let carried = value.ok_or(("no value was carried".to_string(), -32602))?;
+        let value: Value = serde_json::from_value(carried)
+            .map_err(|error| (format!("the value did not read: {error}"), -32602))?;
+        self.with(|session| {
+            let space = session.key_space().map_err(|error| error.to_string())?;
+            space
+                .check(name, &value)
+                .map_err(|reject| reject.to_string())?;
+            session
+                .write_value(name, &value)
+                .map_err(|error| error.to_string())?;
+            Ok(json!(value))
+        })
+    }
+
+    /// Makes a profile the one the device runs from.
+    fn select_profile(&self, id: u64) -> Result<Json, (String, i64)> {
+        self.with(|session| {
+            let selected = session
+                .profile_select(id as u32)
+                .map_err(|error| error.to_string())?;
+            Ok(json!({ "active": selected.id }))
+        })
+    }
+
+    /// Writes a new profile from the body of the one named, or of the one in
+    /// effect when none is.
+    fn create_profile(&self, from: Option<u64>) -> Result<Json, (String, i64)> {
+        self.with(|session| {
+            let source = match from {
+                Some(id) => id as u32,
+                None => session
+                    .profiles()
+                    .map_err(|error| error.to_string())?
+                    .active,
+            };
+            let body = session
+                .profile_get(source)
+                .map_err(|error| error.to_string())?;
+            let id = session
+                .profile_create(&body)
+                .map_err(|error| error.to_string())?;
+            Ok(json!({ "id": id, "from": source }))
+        })
+    }
+
+    /// Deletes a profile the store carries; the factory profile is the device's
+    /// own and its refusal comes back as the device states it.
+    fn delete_profile(&self, id: u64) -> Result<Json, (String, i64)> {
+        self.with(|session| {
+            session
+                .profile_delete(id as u32)
+                .map_err(|error| error.to_string())?;
+            Ok(json!({}))
+        })
+    }
+
+    /// Puts a snapshot's settings onto the device, holding each to its keys.
+    fn restore(&self, text: &str) -> Result<Json, (String, i64)> {
+        let snapshot = thetagp_client::Snapshot::from_json(text)
+            .map_err(|error| (format!("the snapshot did not read: {error}"), -32602))?;
+        self.with(|session| {
+            let restored = snapshot.restore(session).map_err(|error| error.to_string())?;
+            Ok(json!({
+                "values_written": restored.values_written,
+                "profiles_written": restored.profiles_written,
+                "keys_unknown": restored.keys_unknown,
+                "keys_refused": restored.keys_refused,
+                "profiles_refused": restored.profiles_refused,
+            }))
         })
     }
 

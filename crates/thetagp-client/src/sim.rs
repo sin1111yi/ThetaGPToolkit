@@ -166,7 +166,11 @@ pub fn common(request: proto::Request) -> Vec<proto::Reply> {
 /// It is what a consumer is tried against when no board is on the desk, and
 /// what the shape of the exchange is pinned by.
 pub fn device() -> SimulatedDevice {
-    let store = RefCell::new(ProfileStore::default());
+    // The store of a board carries its factory profile from the first boot, so
+    // the simulated one carries it too: profile 0 is what the firmware ships.
+    let mut store = ProfileStore::default();
+    store.bodies.insert(0, br#"{"ver":2}"#.to_vec());
+    let store = RefCell::new(store);
     let config = RefCell::new(ConfigStore::default());
 
     SimulatedDevice::new(move |request| {

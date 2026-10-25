@@ -88,6 +88,8 @@ pub struct App {
 
     pub profiles: Vec<ProfileEntry>,
     pub profile_selected: usize,
+    /// The profile a first `x` asked to delete; a second one deletes it.
+    pub pending_delete: Option<u32>,
 
     pub snapshot: Option<String>,
     pub pane: Pane,
@@ -112,6 +114,7 @@ impl App {
             remap_selected: 0,
             profiles: Vec::new(),
             profile_selected: 0,
+            pending_delete: None,
             snapshot: None,
             pane: Pane::Keys,
             message: String::new(),
@@ -445,6 +448,44 @@ impl App {
         self.refresh()
     }
 
+    /// Writes a new profile from the body of the one in effect.
+    pub fn create_profile(&mut self) -> Result<(), String> {
+        let answer = self.call("session.profile_create", json!({}))?;
+        let id = answer.get("id").and_then(Json::as_u64).unwrap_or(0);
+        self.message = format!("profile #{id} created from the one in effect");
+        self.refresh()?;
+        self.profile_selected = self
+            .profiles
+            .iter()
+            .position(|entry| entry.id as u64 == id)
+            .unwrap_or(0);
+        Ok(())
+    }
+
+    /// Deletes the profile in the list, once a second `x` confirms it.
+    pub fn delete_profile(&mut self) -> Result<(), String> {
+        let Some(entry) = self.profiles.get(self.profile_selected).cloned() else {
+            return Ok(());
+        };
+        if entry.id == 0 {
+            return Err("the factory profile is the board's own and is not deleted".into());
+        }
+        if self.pending_delete != Some(entry.id) {
+            self.pending_delete = Some(entry.id);
+            self.message = format!("press x again to delete profile #{}", entry.id);
+            return Ok(());
+        }
+
+        self.call("session.profile_delete", json!({ "id": entry.id }))?;
+        self.pending_delete = None;
+        self.message = format!("profile #{} deleted", entry.id);
+        self.refresh()?;
+        if self.profile_selected >= self.profiles.len() {
+            self.profile_selected = self.profiles.len().saturating_sub(1);
+        }
+        Ok(())
+    }
+
     pub fn take_snapshot(&mut self) -> Result<(), String> {
         let answer = self.call("session.snapshot", json!({}))?;
         let text = answer
@@ -659,6 +700,22 @@ mod tests {
         assert!(drawn.contains("BoringTechH743"), "the board is named");
         assert!(drawn.contains("LED Brightness"), "the key is named readably");
         assert!(drawn.contains("led.bri"), "the key's own name is shown beside it");
+    }
+
+    #[test]
+    fn a_profile_is_created_from_the_one_in_effect_and_deleted() {
+        let mut app = App::at(daemon_on_sim());
+        app.refresh().expect("a state");
+
+        app.create_profile().expect("a profile is written");
+        assert_eq!(app.profiles.len(), 2, "the new profile is listed beside the factory one");
+        assert!(app.message.contains("created"), "{}", app.message);
+
+        app.delete_profile().expect("a delete is asked for");
+        assert!(app.pending_delete.is_some(), "the first press asks");
+        app.delete_profile().expect("the delete is confirmed");
+        assert_eq!(app.profiles.len(), 1, "the profile is gone, the factory one stays");
+        assert_eq!(app.profiles[0].id, 0);
     }
 
     #[test]

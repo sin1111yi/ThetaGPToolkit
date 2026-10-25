@@ -292,7 +292,7 @@ fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         None => Span::styled(format!(" {}", app.message), Style::default().fg(MUTED)),
     };
     let help = Span::styled(
-        "  tab pane · enter connect/edit/activate · w save · l load · t snapshot · r restore · d disconnect · q quit",
+        "  tab pane · enter connect/edit/activate · n new profile · x delete (twice) · w save · l load · t snapshot · r restore · d disconnect · q quit",
         Style::default().fg(Color::DarkGray),
     );
     frame.render_widget(
