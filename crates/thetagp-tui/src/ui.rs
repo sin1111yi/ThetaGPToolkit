@@ -195,15 +195,24 @@ fn draw_remap(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     let slots = app.remap_len();
     let rows: Vec<Row> = (0..slots)
-        .map(|slot| {
+        .map(|index| {
+            let from = match labels::button(index as i32) {
+                Some(name) => Line::from(vec![
+                    Span::raw(name.to_string()),
+                    Span::styled(format!(" ({index})"), Style::default().fg(Color::DarkGray)),
+                ]),
+                None => Line::from(Span::styled(index.to_string(), Style::default().fg(Color::DarkGray))),
+            };
             let shown = match &app.editing {
-                Some(editing) if editing.target == Target::Remap(slot) => {
-                    format!("{}▏", editing.text)
+                Some(editing) if editing.target == Target::Remap(index) => {
+                    Line::from(format!("{}▏", editing.text))
                 }
-                _ => app.remap_text(slot),
+                _ => Line::from(labels::slot(
+                    app.remap_text(index).parse::<i32>().unwrap_or(0),
+                )),
             };
             Row::new(vec![
-                Cell::from(format!("input {slot:02}")),
+                Cell::from(from),
                 Cell::from("→").style(Style::default().fg(MUTED)),
                 Cell::from(shown),
             ])
@@ -218,7 +227,7 @@ fn draw_remap(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             Constraint::Min(8),
         ],
     )
-    .header(Row::new(vec!["input", "", "feeds"]).style(Style::default().fg(MUTED)))
+    .header(Row::new(vec!["from", "", "feeds"]).style(Style::default().fg(MUTED)))
     .block(block)
     .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
