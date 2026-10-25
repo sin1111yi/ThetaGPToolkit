@@ -127,7 +127,8 @@ pub fn common(request: proto::Request) -> Vec<proto::Reply> {
         }
         proto::request::Kind::ConfigListKeys(_) => {
             proto::reply::Kind::ConfigListKeys(proto::ConfigListKeysOk {
-                count: 2,
+                    inputs: 8,
+                    count: 2,
                 keys: vec![
                     proto::ConfigKeyEntry {
                         key: "led.bri".to_string(),
@@ -307,6 +308,7 @@ pub fn device() -> SimulatedDevice {
                     proto::ConfigListKeysOk {
                         count: config.keys.len() as u32,
                         keys: config.keys.clone(),
+                        inputs: 8,
                     },
                 ))
             }

@@ -168,6 +168,10 @@ impl Service {
                     "dropped_keys": saved.dropped_keys,
                 }))
             }),
+            "session.inputs" => self.with(|session| {
+                let space = session.key_space().map_err(|error| error.to_string())?;
+                Ok(json!({ "inputs": space.inputs() }))
+            }),
             "session.profiles" => self.with(|session| {
                 let listed = session.profiles().map_err(|error| error.to_string())?;
                 let profiles: Vec<Json> = listed

@@ -81,6 +81,8 @@ pub struct App {
     pub selected: usize,
     pub editing: Option<Editing>,
 
+    /// The inputs the board wires: the remap table's real slots.
+    pub inputs: usize,
     pub remap_selected: usize,
 
     pub profiles: Vec<ProfileEntry>,
@@ -100,6 +102,7 @@ impl App {
             sources: Vec::new(),
             source: 0,
             connected: None,
+            inputs: 0,
             identity: None,
             keys: Vec::new(),
             values: BTreeMap::new(),
@@ -173,6 +176,12 @@ impl App {
         let keys = self.call("session.keys", json!({}))?;
         self.keys = serde_json::from_value(keys).map_err(|error| error.to_string())?;
 
+        let declared = self.call("session.inputs", json!({}))?;
+        self.inputs = declared
+            .get("inputs")
+            .and_then(Json::as_u64)
+            .unwrap_or(0) as usize;
+
         let config = self.call("session.config", json!({}))?;
         self.values = serde_json::from_value(config).map_err(|error| error.to_string())?;
 
@@ -231,10 +240,20 @@ impl App {
         }
     }
 
+    /// The slots the remap pane shows: the inputs this board wires, and no
+    /// more. A device that declares no count falls back to the table's length.
     pub fn remap_len(&self) -> usize {
-        self.remap_key()
-            .map(|key| key.count as usize)
-            .unwrap_or(0)
+        match self.inputs {
+            0 => self
+                .remap_key()
+                .map(|key| key.count as usize)
+                .unwrap_or(0),
+            inputs => inputs.min(
+                self.remap_key()
+                    .map(|key| key.count as usize)
+                    .unwrap_or(inputs),
+            ),
+        }
     }
 
     /// The target one input slot feeds, as the table carries it.

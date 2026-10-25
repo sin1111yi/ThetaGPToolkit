@@ -74,6 +74,7 @@ fn a_listing_reply_carries_one_entry_per_key() {
         kind: Some(proto::reply::Kind::ConfigListKeys(
             proto::ConfigListKeysOk {
                 count: 2,
+                inputs: 2,
                 keys: vec![
                     proto::ConfigKeyEntry {
                         key: "led.bri".to_string(),

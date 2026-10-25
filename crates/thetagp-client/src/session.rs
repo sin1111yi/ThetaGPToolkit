@@ -325,7 +325,10 @@ impl<T: Transport> Session<T> {
     /// Every key the device declares, in the order it declared them.
     pub fn key_space(&mut self) -> Result<KeySpace, SessionError> {
         let declared = self.list_keys()?;
-        Ok(KeySpace::from_entries(&declared.keys))
+        Ok(KeySpace::from_entries_and_inputs(
+            &declared.keys,
+            declared.inputs,
+        ))
     }
 
     /// Writes one configuration value, whichever of the two shapes it has.

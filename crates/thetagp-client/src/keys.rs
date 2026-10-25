@@ -101,11 +101,22 @@ pub struct Key {
 pub struct KeySpace {
     keys: Vec<Key>,
     by_name: HashMap<String, usize>,
+    inputs: u32,
 }
 
 impl KeySpace {
+    /// The inputs the board wires: the remap table's real slots.
+    pub fn inputs(&self) -> u32 {
+        self.inputs
+    }
+
     /// The space a device declared.
     pub fn from_entries(entries: &[proto::ConfigKeyEntry]) -> Self {
+        Self::from_entries_and_inputs(entries, 0)
+    }
+
+    /// The space a device declared, with the inputs it wires.
+    pub fn from_entries_and_inputs(entries: &[proto::ConfigKeyEntry], inputs: u32) -> Self {
         let mut keys = Vec::with_capacity(entries.len());
         let mut by_name = HashMap::with_capacity(entries.len());
         for entry in entries {
@@ -127,7 +138,7 @@ impl KeySpace {
                     .then(|| entry.value_enum.clone()),
             });
         }
-        KeySpace { keys, by_name }
+        KeySpace { keys, by_name, inputs }
     }
 
     /// Every key, in declaration order.

@@ -196,13 +196,12 @@ fn draw_remap(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let slots = app.remap_len();
     let rows: Vec<Row> = (0..slots)
         .map(|index| {
-            let from = match labels::button(index as i32) {
-                Some(name) => Line::from(vec![
-                    Span::raw(name.to_string()),
-                    Span::styled(format!(" ({index})"), Style::default().fg(Color::DarkGray)),
-                ]),
-                None => Line::from(Span::styled(index.to_string(), Style::default().fg(Color::DarkGray))),
-            };
+            // The slot is the board's own input index, as its key map numbers
+            // it; the button it feeds is named from the schema's table.
+            let from = Line::from(Span::styled(
+                format!("input {index:02}"),
+                Style::default().fg(MUTED),
+            ));
             let shown = match &app.editing {
                 Some(editing) if editing.target == Target::Remap(index) => {
                     Line::from(format!("{}▏", editing.text))
@@ -223,11 +222,11 @@ fn draw_remap(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         rows,
         [
             Constraint::Length(12),
-            Constraint::Length(3),
+            Constraint::Length(2),
             Constraint::Min(8),
         ],
     )
-    .header(Row::new(vec!["from", "", "feeds"]).style(Style::default().fg(MUTED)))
+    .header(Row::new(vec!["input", "", "feeds"]).style(Style::default().fg(MUTED)))
     .block(block)
     .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
