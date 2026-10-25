@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "The ThetaGP request and reply types, generated from the pinned schema"
 
 [dependencies]
+prost-reflect.workspace = true
 prost.workspace = true
 
 [dev-dependencies]

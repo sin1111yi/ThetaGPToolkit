@@ -48,22 +48,12 @@ pub fn label(name: &str) -> Option<&'static str> {
     })
 }
 
-/// The buttons a remap slot may feed, in the order the firmware's own mask table
-/// carries them; a slot past the named ones is left to its index.
-const BUTTONS: [&str; 24] = [
-    "B1", "B2", "B3", "B4", "L1", "R1", "L2", "R2", "S1", "S2", "L3", "R3", "A1", "A2", "A3",
-    "A4", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8",
-];
-
 /// The firmware's value for a slot that feeds nothing.
 pub const UNMAPPED: i32 = 0xFF;
 
-/// The button a slot index names, when the firmware names one.
-pub fn button(index: i32) -> Option<&'static str> {
-    usize::try_from(index)
-        .ok()
-        .and_then(|index| BUTTONS.get(index))
-        .copied()
+/// The button a slot index names, from the schema's own GamepadButton.
+pub fn button(index: i32) -> Option<String> {
+    thetagp_proto::enum_value_name("GamepadButton", index)
 }
 
 /// A remap value as the table shows it: the button's name and its index, or
@@ -78,17 +68,57 @@ pub fn slot(value: i32) -> String {
     }
 }
 
+/// A key's value as the table shows it: the name its enum gives the number,
+/// with the number beside it, or the bare number when the schema names none.
+pub fn value(key: &thetagp_client::Key, number: i32) -> String {
+    match &key.value_enum {
+        Some(enum_name) => match thetagp_proto::enum_value_name(enum_name, number) {
+            Some(name) => format!("{name} ({number})"),
+            None => number.to_string(),
+        },
+        None => number.to_string(),
+    }
+}
+
+/// A run of values, each shown the way its key's enum reads it.
+pub fn values(key: &thetagp_client::Key, run: &[i32]) -> String {
+    run.iter()
+        .map(|number| value(key, *number))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn a_slot_is_named_by_the_button_it_feeds() {
+    fn a_slot_is_named_by_the_button_the_schema_lists() {
+        assert_eq!(button(0).as_deref(), Some("B1"));
+        assert_eq!(button(23).as_deref(), Some("E8"));
+        assert_eq!(button(24), None);
         assert_eq!(slot(0), "B1 (0)");
         assert_eq!(slot(4), "L1 (4)");
         assert_eq!(slot(23), "E8 (23)");
         assert_eq!(slot(24), "24");
         assert_eq!(slot(UNMAPPED), "unmapped");
+    }
+
+    #[test]
+    fn a_value_is_named_by_the_enum_its_key_declares() {
+        let key = thetagp_client::Key {
+            name: "map.socd".into(),
+            domain: "map".into(),
+            leaf: "socd".into(),
+            kind: thetagp_client::KeyType::U8,
+            min: 0,
+            max: 4,
+            count: 1,
+            reboot: false,
+            value_enum: Some("SOCDMode".into()),
+        };
+        assert_eq!(value(&key, 0), "UpPriority (0)");
+        assert_eq!(value(&key, 2), "SecondInputPriority (2)");
     }
 
     #[test]

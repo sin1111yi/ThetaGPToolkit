@@ -90,6 +90,10 @@ pub struct Key {
     pub count: u32,
     /// Whether a change to the key takes effect at the next boot.
     pub reboot: bool,
+    /// The schema enum the value is drawn from, when its numbers stand for
+    /// names: `SOCDMode` for a key whose values are that enum's. `None` for a
+    /// key whose value is a plain number.
+    pub value_enum: Option<String>,
 }
 
 /// Every key a device carries, in the order it declared them.
@@ -119,6 +123,8 @@ impl KeySpace {
                 max: entry.max,
                 count: entry.count,
                 reboot: entry.reboot,
+                value_enum: (!entry.value_enum.is_empty())
+                    .then(|| entry.value_enum.clone()),
             });
         }
         KeySpace { keys, by_name }

@@ -468,7 +468,7 @@ impl ConfigStore {
 /// The keys the simulated device declares.
 fn declared_keys() -> Vec<proto::ConfigKeyEntry> {
     vec![
-        entry("map.socd", 0, 3, proto::ConfigKeyType::ConfigKeyU8, 0, true),
+        entry("map.socd", 0, 3, proto::ConfigKeyType::ConfigKeyU8, 0, true, "SOCDMode"),
         entry(
             "map.btn_map",
             0,
@@ -476,6 +476,7 @@ fn declared_keys() -> Vec<proto::ConfigKeyEntry> {
             proto::ConfigKeyType::ConfigKeyU8Array,
             8,
             false,
+            "GamepadButton",
         ),
         entry(
             "led.bri",
@@ -484,6 +485,7 @@ fn declared_keys() -> Vec<proto::ConfigKeyEntry> {
             proto::ConfigKeyType::ConfigKeyU8,
             0,
             false,
+            "",
         ),
         entry(
             "led.rgb.hz",
@@ -492,6 +494,7 @@ fn declared_keys() -> Vec<proto::ConfigKeyEntry> {
             proto::ConfigKeyType::ConfigKeyU8,
             0,
             false,
+            "",
         ),
         entry(
             "usb.input_mode",
@@ -500,6 +503,7 @@ fn declared_keys() -> Vec<proto::ConfigKeyEntry> {
             proto::ConfigKeyType::ConfigKeyU8,
             0,
             true,
+            "InputMode",
         ),
     ]
 }
@@ -511,6 +515,7 @@ fn entry(
     kind: proto::ConfigKeyType,
     count: u32,
     reboot: bool,
+    value_enum: &str,
 ) -> proto::ConfigKeyEntry {
     proto::ConfigKeyEntry {
         key: key.to_string(),
@@ -519,6 +524,7 @@ fn entry(
         reboot,
         r#type: kind as i32,
         count,
+        value_enum: value_enum.to_string(),
     }
 }
 

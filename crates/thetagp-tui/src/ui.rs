@@ -125,7 +125,7 @@ fn draw_keys(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 Some(editing) if editing.target == Target::Key(index) => {
                     format!("{}▏", editing.text)
                 }
-                _ => app.value_text(index),
+                _ => app.value_display(index),
             };
             let style = if matches!(&app.editing, Some(editing) if editing.target == Target::Key(index)) {
                 Style::default().fg(ACCENT)

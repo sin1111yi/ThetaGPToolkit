@@ -261,6 +261,18 @@ impl App {
         }
     }
 
+    /// How a key's value reads: the name its enum gives, the number beside it.
+    pub fn value_display(&self, row: usize) -> String {
+        let Some(key) = self.keys.get(row) else {
+            return String::new();
+        };
+        match self.values.get(&key.name) {
+            Some(Value::Scalar(number)) => crate::labels::value(key, *number as i32),
+            Some(Value::Array(run)) => crate::labels::values(key, run),
+            None => String::new(),
+        }
+    }
+
     pub fn begin_edit(&mut self) {
         match self.pane {
             Pane::Remap => {

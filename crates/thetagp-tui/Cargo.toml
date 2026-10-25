@@ -16,6 +16,7 @@ serde.workspace = true
 serde_json.workspace = true
 thetagp-client.workspace = true
 thetagp-ipc.workspace = true
+thetagp-proto.workspace = true
 
 [dev-dependencies]
 thetagp-daemon = { path = "../thetagp-daemon" }

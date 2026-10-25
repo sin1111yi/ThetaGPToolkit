@@ -961,6 +961,7 @@ version = "0.1.0"
 dependencies = [
  "prost",
  "prost-build",
+ "prost-reflect",
  "thetagp-wire",
 ]
 
@@ -984,6 +985,7 @@ dependencies = [
  "thetagp-client",
  "thetagp-daemon",
  "thetagp-ipc",
+ "thetagp-proto",
 ]
 
 [[package]]
