@@ -6,9 +6,9 @@ MCP server, in one Rust workspace.
 ## What it is
 
 One Cargo workspace, one core, and one process that owns the device: the
-**daemon**. The **frontend** and the **MCP server** ask it over a local socket,
-so both can be open at once and a device that re-enumerates is picked up again
-under them. Nothing is reached through a command line.
+**daemon**. The **terminal window** and the **MCP server** ask it over a local
+socket, so both can be open at once and a device that re-enumerates is picked up
+again under them.
 
 - The protocol is `ThetaGP.PB`, a submodule that follows the schema's `main`:
   the toolkit speaks the same wire the firmware does, both sides carrying the
@@ -34,8 +34,10 @@ under them. Nothing is reached through a command line.
 - A daemon that holds the device, so a window and a model share one board, and a
   socket and a token that only its owner can read in front of it.
 - An MCP server over stdio, so a model can work the device and the protocol.
-- A window over the daemon: the connection, the board's identity, every key the
-  device declares -- written where it is edited -- the profiles, and a snapshot.
+- A terminal window over the daemon: the sources, the board's identity, every
+  key the device declares -- written where it is edited -- the profiles, and a
+  snapshot taken and put back. `--frame` renders one screen as text, for a log
+  or a machine with no display.
 - A simulated device, so every one of those paths runs with no board on the desk.
 
 ## Quick Start
@@ -48,23 +50,22 @@ cargo run -p thetagp-daemon              # the device's host; Ctrl-C to stop it
 cargo run -p thetagp-mcp -- --simulated  # the tools, over a device in-process
 ```
 
-The window is built from two sides: the web side first, then the app that
-embeds it.
-
 ```bash
-cd crates/thetagp-frontend/ui
-bun install && bun run build     # writes ui/dist, which the app embeds
-cd -
-cargo run -p thetagp-frontend    # needs a display, and a board or `simulated`
+cargo run -p thetagp-tui                          # a board, or `simulated`
+cargo run -p thetagp-tui -- --frame               # one screen, as text
+cargo run -p thetagp-tui -- --frame --source /dev/ttyACM0
 ```
+
+Keys: `tab` between the panes, `enter` to connect, edit a value or activate a
+profile, `w` save, `l` load, `t` snapshot, `r` restore, `d` disconnect, `q`
+quit.
 
 A client that finds no daemon starts one beside itself, so the daemon is not
 something to run by hand unless its log is wanted.
 
 Needs Rust 1.85+, `protoc` (the schema is compiled into Rust types at build
-time), `bun` for the window's web side, and — to talk to a board — the device's
-own USB interface: `/dev/ttyACM*` for the daemon on Linux, which a source
-checkout opens as the user who runs it.
+time) and — to talk to a board — the device's own USB interface: `/dev/ttyACM*`
+for the daemon on Linux, which a source checkout opens as the user who runs it.
 
 ## Layout
 
@@ -82,7 +83,8 @@ crates/
                     and the window's typed calls over that link
   thetagp-mcp/      the same tools, as the JSON-RPC a model host speaks over
                     stdio: it passes each call to the daemon
-  thetagp-frontend/ the window: src-tauri/ asks the daemon, ui/ renders it
+  thetagp-tui/      the window, in a terminal: the daemon's device as keys,
+                    profiles and a snapshot, with `--frame` for no display
 ```
 
 A device is one port, so one process opens it: the daemon. Everything else --

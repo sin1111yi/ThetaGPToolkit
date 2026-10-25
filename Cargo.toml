@@ -7,8 +7,8 @@ members = [
     "crates/thetagp-mcp",
     "crates/thetagp-proto",
     "crates/thetagp-tools",
+    "crates/thetagp-tui",
     "crates/thetagp-wire",
-    "crates/thetagp-frontend/src-tauri",
 ]
 
 [workspace.package]
