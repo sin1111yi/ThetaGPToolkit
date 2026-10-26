@@ -83,14 +83,15 @@ pub enum Row {
     Key(usize),
 }
 
-/// A delete the screen asks about before it is done: a board's profiles are not
-/// a file that can be restored, so what goes is named before it goes.
-#[derive(Clone, PartialEq, Eq)]
-pub struct Confirm {
-    /// The profile the delete would take.
-    pub id: u32,
-    /// The name its body carries, so the box says what is lost.
-    pub name: String,
+/// A question the screen holds until it is answered.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Prompt {
+    /// A delete it asks about before it is done: a board's profiles are not a
+    /// file that can be restored, so what goes is named before it goes.
+    Delete { id: u32, name: String },
+    /// A save it asks about before the screen goes: the values written to the
+    /// device are the running ones, and only a save puts them on the flash.
+    Quit,
 }
 
 /// A value being typed.
@@ -115,6 +116,9 @@ pub struct App {
     pub identity: Option<Identity>,
     pub keys: Vec<Key>,
     pub values: BTreeMap<String, Value>,
+    /// The values the profile holds on the flash: what a change is measured
+    /// against when the screen asks whether to save before it goes.
+    saved: BTreeMap<String, Value>,
     /// The line of the options menu in focus, at the level it is on.
     pub selected: usize,
     /// The segments the reader has gone into: empty at the top of the menu.
@@ -127,8 +131,17 @@ pub struct App {
 
     pub profiles: Vec<ProfileEntry>,
     pub profile_selected: usize,
-    /// The delete the screen is asking about, and the profile it would take.
-    pub confirm: Option<Confirm>,
+    /// What the screen has said and done, oldest first: a line the reader can
+    /// look back at after the status line has moved on.
+    pub log: Vec<String>,
+    /// The last line taken into the log, so a message already there is not
+    /// written twice.
+    noted: String,
+    /// When the screen opened, for the seconds the log counts from.
+    opened: std::time::Instant,
+
+    /// The question the screen is asking, if it is asking one.
+    pub prompt: Option<Prompt>,
 
     pub snapshot: Option<String>,
     pub pane: Pane,
@@ -148,13 +161,17 @@ impl App {
             identity: None,
             keys: Vec::new(),
             values: BTreeMap::new(),
+            saved: BTreeMap::new(),
             selected: 0,
             path: Vec::new(),
             editing: None,
             remap_selected: 0,
             profiles: Vec::new(),
             profile_selected: 0,
-            confirm: None,
+            log: Vec::new(),
+            noted: String::new(),
+            opened: std::time::Instant::now(),
+            prompt: None,
             snapshot: None,
             pane: Pane::Keys,
             message: String::new(),
@@ -175,7 +192,7 @@ impl App {
         if let Err(error) = self.sources_now() {
             self.error = Some(error);
         }
-        if let Err(error) = self.refresh() {
+        if let Err(error) = self.refreshed() {
             self.error = Some(error);
         }
         // Nothing to edit until a device answers: the first thing to do is pick
@@ -183,6 +200,7 @@ impl App {
         if self.connected.is_none() {
             self.pane = Pane::Sources;
         }
+        self.note();
     }
 
     fn sources_now(&mut self) -> Result<(), String> {
@@ -269,7 +287,9 @@ impl App {
         // A device that answered has values to read: the keys are where a
         // reader lands, rather than the list of sources they just left.
         self.pane = Pane::Keys;
-        self.refresh()
+        self.refreshed()?;
+        self.note();
+        Ok(())
     }
 
     pub fn disconnect(&mut self) -> Result<(), String> {
@@ -716,6 +736,10 @@ impl App {
             .get("dropped_keys")
             .and_then(Json::as_u64)
             .unwrap_or(0);
+        if persisted {
+            // What the flash holds is what the device holds now.
+            self.saved = self.values.clone();
+        }
         self.message = if persisted {
             if dropped == 0 {
                 "saved to the device".into()
@@ -731,7 +755,7 @@ impl App {
     pub fn load(&mut self) -> Result<(), String> {
         self.call("session.load", json!({}))?;
         self.message = "the stored configuration is back in effect".into();
-        self.refresh()
+        self.refreshed()
     }
 
     pub fn select_profile(&mut self) -> Result<(), String> {
@@ -744,7 +768,7 @@ impl App {
             .and_then(Json::as_u64)
             .unwrap_or(entry.id as u64);
         self.message = format!("#{active} is the profile the device runs from");
-        self.refresh()
+        self.refreshed()
     }
 
     /// Writes a new profile from the body of the one in effect.
@@ -752,7 +776,7 @@ impl App {
         let answer = self.call("session.profile_create", json!({}))?;
         let id = answer.get("id").and_then(Json::as_u64).unwrap_or(0);
         self.message = format!("profile #{id} created from the one in effect");
-        self.refresh()?;
+        self.refreshed()?;
         self.profile_selected = self
             .profiles
             .iter()
@@ -762,6 +786,109 @@ impl App {
     }
 
     /// Deletes the profile in the list, once a second `x` confirms it.
+    /// Takes what the screen last said into the log, once: a message that is
+    /// still the one on the status line is not a new line.
+    pub fn note(&mut self) {
+        let line = match &self.error {
+            Some(error) => error.clone(),
+            None => self.message.clone(),
+        };
+        if line.is_empty() || line == self.noted {
+            return;
+        }
+        self.noted = line.clone();
+        let seconds = self.opened.elapsed().as_secs_f32();
+        self.log.push(format!("{seconds:>6.1}s {line}"));
+        // The log is a window on what just happened, not an archive.
+        if self.log.len() > 200 {
+            self.log.remove(0);
+        }
+    }
+
+    /// What the item in focus is, and what it is for: the line the screen reads
+    /// beside the device.
+    pub fn about(&self) -> (String, String) {
+        let answered = |name: &str, title: String| {
+            (title, crate::labels::about(name).unwrap_or_default().to_string())
+        };
+        match self.pane {
+            Pane::Keys => match self.rows().get(self.selected) {
+                Some(Row::Group { segment, .. }) => {
+                    answered(segment, segment.clone())
+                }
+                Some(Row::Key(row)) => match self.keys.get(*row) {
+                    Some(key) => {
+                        let title = crate::labels::label(&key.name).unwrap_or(&key.name).to_string();
+                        answered(&key.name, title)
+                    }
+                    None => (String::new(), String::new()),
+                },
+                None => (String::new(), String::new()),
+            },
+            Pane::Remap => match self.remap_key() {
+                Some(_) => {
+                    let slot = self.remap_selected;
+                    let button = crate::labels::slot(
+                        self.remap_text(slot).parse().unwrap_or(255),
+                    );
+                    (
+                        format!("input {slot:02}"),
+                        format!("The button input {slot:02} feeds: {button}."),
+                    )
+                }
+                None => (String::new(), String::new()),
+            },
+            Pane::Profiles => match self.profiles.get(self.profile_selected) {
+                Some(entry) => {
+                    let title = format!("#{}", entry.id);
+                    let what = if entry.id == 0 {
+                        "The profile the board ships with: the file the board falls back to."
+                    } else {
+                        "A profile this board carries: saving writes the values on screen into it."
+                    };
+                    (title, what.to_string())
+                }
+                None => (String::new(), String::new()),
+            },
+            Pane::Sources => match self.sources.get(self.source) {
+                Some(port) => (
+                    port.clone(),
+                    "A serial port to open the board on. The device is bound once, here.".to_string(),
+                ),
+                None => (String::new(), String::new()),
+            },
+        }
+    }
+
+    /// Reads the state, and takes what it read as the values the profile holds:
+    /// a read that follows a write is not one of these.
+    fn refreshed(&mut self) -> Result<(), String> {
+        self.refresh()?;
+        self.saved = self.values.clone();
+        Ok(())
+    }
+
+    /// The keys whose value is not the one the profile holds on the flash.
+    pub fn unsaved(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .values
+            .iter()
+            .filter(|(name, value)| self.saved.get(*name) != Some(value))
+            .map(|(name, _)| name.clone())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// Asks, in a box, whether to save before the screen goes.
+    pub fn ask_quit(&mut self) -> Result<(), String> {
+        if self.unsaved().is_empty() {
+            return Ok(());
+        }
+        self.prompt = Some(Prompt::Quit);
+        Ok(())
+    }
+
     /// Asks, in a box, before deleting the profile in focus.
     pub fn ask_delete(&mut self) -> Result<(), String> {
         let Some(entry) = self.profiles.get(self.profile_selected).cloned() else {
@@ -770,7 +897,7 @@ impl App {
         if entry.id == 0 {
             return Err("the factory profile is the board's own and is not deleted".into());
         }
-        self.confirm = Some(Confirm {
+        self.prompt = Some(Prompt::Delete {
             id: entry.id,
             name: entry.name.clone(),
         });
@@ -779,12 +906,13 @@ impl App {
 
     /// Deletes the profile the box asks about.
     pub fn confirm_delete(&mut self) -> Result<(), String> {
-        let Some(confirm) = self.confirm.take() else {
+        let Some(Prompt::Delete { id, .. }) = self.prompt.take() else {
+            self.prompt = None;
             return Ok(());
         };
 
-        self.call("session.profile_delete", json!({ "id": confirm.id }))?;
-        self.message = format!("profile #{} deleted", confirm.id);
+        self.call("session.profile_delete", json!({ "id": id }))?;
+        self.message = format!("profile #{id} deleted");
         self.refresh()?;
         if self.profile_selected >= self.profiles.len() {
             self.profile_selected = self.profiles.len().saturating_sub(1);
@@ -792,8 +920,9 @@ impl App {
         Ok(())
     }
 
-    pub fn cancel_delete(&mut self) {
-        self.confirm = None;
+    /// Closes the box without answering it, whatever it asked.
+    pub fn cancel_prompt(&mut self) {
+        self.prompt = None;
     }
 
     pub fn take_snapshot(&mut self) -> Result<(), String> {
@@ -837,7 +966,7 @@ impl App {
             },
             ""
         );
-        self.refresh()
+        self.refreshed()
     }
 
     fn call(&mut self, method: &str, params: Json) -> Result<Json, String> {
@@ -1012,7 +1141,7 @@ mod tests {
         let mut app = App::at(daemon_on_sim());
         app.refresh().expect("a state");
 
-        let backend = ratatui::backend::TestBackend::new(100, 24);
+        let backend = ratatui::backend::TestBackend::new(120, 24);
         let mut terminal = ratatui::Terminal::new(backend).expect("a terminal");
         terminal
             .draw(|frame| crate::ui::draw(frame, &app))
@@ -1088,7 +1217,9 @@ mod tests {
 
         app.ask_delete().expect("a delete is asked about");
         assert!(
-            app.confirm.as_ref().is_some_and(|confirm| confirm.id == 1),
+            app.prompt
+                .as_ref()
+                .is_some_and(|prompt| *prompt == Prompt::Delete { id: 1, name: String::new() }),
             "the box names the profile it would take"
         );
         app.confirm_delete().expect("the delete is answered");
@@ -1124,7 +1255,7 @@ mod tests {
 
         app.confirm_delete().expect("the delete is answered");
         assert_eq!(app.profiles.len(), before - 1, "the profile goes");
-        assert!(app.confirm.is_none(), "and the box is gone with it");
+        assert!(app.prompt.is_none(), "and the box is gone with it");
     }
 
     #[test]
@@ -1137,8 +1268,8 @@ mod tests {
         let before = app.profiles.len();
 
         app.ask_delete().expect("a delete is asked about");
-        app.cancel_delete();
-        assert!(app.confirm.is_none(), "the box is closed");
+        app.cancel_prompt();
+        assert!(app.prompt.is_none(), "the box is closed");
         assert_eq!(app.profiles.len(), before, "and the profile stays");
         assert!(
             !screen(&app).contains("delete profile?"),
@@ -1270,6 +1401,78 @@ mod tests {
     }
 
     #[test]
+    fn a_change_that_is_not_on_the_flash_is_asked_about_before_the_screen_goes() {
+        let mut app = App::at(daemon_on_sim());
+        app.refreshed().expect("a state");
+        assert!(
+            app.unsaved().is_empty(),
+            "nothing is pending when the screen opens"
+        );
+
+        select(&mut app, "led.bri");
+        app.begin_edit().expect("the key is editable");
+        app.edit_push('9');
+        app.commit_edit().expect("the value is written");
+        assert_eq!(
+            app.unsaved(),
+            vec!["led.bri".to_string()],
+            "the write is on the device and not on the flash"
+        );
+
+        app.ask_quit().expect("the question is put");
+        let boxed = screen(&app);
+        assert!(boxed.contains("save before quitting?"), "a box asks");
+        assert!(
+            boxed.contains("1 of the values are not on the flash"),
+            "and says how many would be lost"
+        );
+        assert!(boxed.contains("led.bri"), "and which ones");
+
+        app.cancel_prompt();
+        assert!(app.prompt.is_none(), "the box closes on its own answer");
+    }
+
+    #[test]
+    fn a_save_puts_the_change_on_the_flash_and_leaves_nothing_to_ask() {
+        let mut app = App::at(daemon_on_sim());
+        app.refreshed().expect("a state");
+        select(&mut app, "led.bri");
+        app.begin_edit().expect("the key is editable");
+        app.edit_push('9');
+        app.commit_edit().expect("the value is written");
+
+        app.save().expect("the save");
+        assert!(app.unsaved().is_empty(), "the flash holds it now");
+
+        app.ask_quit().expect("nothing to ask");
+        assert!(app.prompt.is_none(), "so no box opens");
+    }
+
+    #[test]
+    fn a_value_set_back_to_the_one_on_the_flash_leaves_nothing_to_ask() {
+        let mut app = App::at(daemon_on_sim());
+        app.refreshed().expect("a state");
+        let was = app.values.get("led.bri").cloned().expect("the value");
+        select(&mut app, "led.bri");
+
+        app.begin_edit().expect("the key is editable");
+        app.edit_push('9');
+        app.commit_edit().expect("the value is written");
+        assert_eq!(app.unsaved().len(), 1);
+
+        app.begin_edit().expect("the key is editable");
+        app.editing.as_mut().expect("an edit").text = match &was {
+            Value::Scalar(number) => number.to_string(),
+            other => panic!("{other:?}"),
+        };
+        app.commit_edit().expect("the value is written back");
+        assert!(
+            app.unsaved().is_empty(),
+            "a change that is no change needs no question"
+        );
+    }
+
+    #[test]
     fn the_options_open_on_the_paths_their_names_carry() {
         let mut app = App::at(daemon_on_sim());
         app.refresh().expect("a state");
@@ -1380,10 +1583,11 @@ mod tests {
             !top.contains("LED Mode"),
             "and the keys inside it are not on the top level"
         );
-        // The column describes the line in focus, which is the first segment.
+        // The column beside the menu says what the line in focus is for, and
+        // the names a value may take are read where the value is written.
         assert!(
-            top.contains("1 key · enter goes in"),
-            "the column says the way in"
+            top.contains("How the"),
+            "the column says what the segment is for"
         );
 
         app.selected = 1;
@@ -1396,6 +1600,12 @@ mod tests {
         );
         assert!(inside.contains("LED Mode"));
         assert!(inside.contains("▸ rgb"), "a deeper segment is offered too");
+        // The column wraps at eleven characters, so the words are what is asked
+        // for rather than a phrase that would be broken across lines.
+        assert!(
+            inside.contains("Brightness") && inside.contains("strip"),
+            "the column follows the line in focus"
+        );
     }
 
     #[test]
@@ -1484,7 +1694,7 @@ mod tests {
 
     /// The screen as a terminal holds it: the cells, with what each is drawn in.
     fn buffer_of(app: &App) -> ratatui::buffer::Buffer {
-        let backend = ratatui::backend::TestBackend::new(100, 40);
+        let backend = ratatui::backend::TestBackend::new(120, 40);
         let mut terminal = ratatui::Terminal::new(backend).expect("a terminal");
         terminal
             .draw(|frame| crate::ui::draw(frame, app))
@@ -1542,8 +1752,8 @@ mod tests {
             "and the keys it answers to"
         );
         assert!(
-            boxed.contains("UP (0)") && boxed.contains("E8 (31)"),
-            "every name the value may take is in it"
+            boxed.contains("DOWN (1)") && boxed.contains("B4 (7)"),
+            "the names around the one held are in it"
         );
         assert!(
             boxed.contains("→ B1 (4)"),
@@ -1552,7 +1762,9 @@ mod tests {
 
         // The box keeps to the device's column: what a value may be is still
         // read on the right while it is typed.
-        let choices = |line: &str| line.chars().skip(68).collect::<String>();
+        // The body takes 68% of the frame's width: nothing of the box may be
+        // drawn past it.
+        let choices = |line: &str| line.chars().skip(82).collect::<String>();
         for (at, (left, right)) in plain.lines().zip(boxed.lines()).enumerate() {
             assert_eq!(
                 choices(left),

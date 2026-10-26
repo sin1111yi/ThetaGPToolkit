@@ -6,12 +6,12 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Scrollbar,
-    ScrollbarOrientation, ScrollbarState, Table, TableState,
+    ScrollbarOrientation, ScrollbarState, Table, TableState, Wrap,
 };
 
 use thetagp_client::KeyType;
 
-use crate::app::{App, Pane, Target};
+use crate::app::{App, Pane, Prompt, Target};
 use crate::labels;
 
 const ACCENT: Color = Color::Rgb(90, 156, 255);
@@ -21,24 +21,29 @@ const MUTED: Color = Color::Rgb(139, 146, 156);
 pub(crate) const HIGHLIGHT: Color = Color::Rgb(232, 176, 96);
 
 pub fn draw(frame: &mut Frame, app: &App) {
-    // The body on the left, the choices the item in focus offers on the right,
-    // and the keys on a line under both: the help is as wide as the terminal,
-    // which is what keeps it from being cut at the body's edge.
+    // The device on the left, what the line in focus means in a narrow column
+    // beside it, and what the screen has said in the room the choices used to
+    // take; the keys run under all three, as wide as the terminal.
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(9), Constraint::Length(4)])
         .split(frame.area());
     let columns = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(68), Constraint::Percentage(32)])
+        .constraints([
+            Constraint::Percentage(68),
+            Constraint::Percentage(11),
+            Constraint::Percentage(21),
+        ])
         .split(rows[0]);
     draw_body(frame, app, columns[0]);
-    draw_options(frame, app, columns[1]);
-    // The choices column stays whole: the box a value is typed in sits over the
-    // device alone, so what the value may be is read beside it.
+    draw_about(frame, app, columns[1]);
+    draw_log(frame, app, columns[2]);
     draw_status(frame, app, rows[1]);
+    // A box sits over the device alone: what it is writing is read against the
+    // panes, never against the description of it.
     draw_edit(frame, app, columns[0]);
-    draw_confirm(frame, app, columns[0]);
+    draw_prompt(frame, app, columns[0]);
 }
 
 fn draw_body(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -363,43 +368,74 @@ fn dialog_in(area: ratatui::layout::Rect, width: u16, height: u16) -> ratatui::l
 
 /// The question `x` asks before a profile goes: the board keeps its profiles
 /// itself, so what would be lost is named before it is lost.
-fn draw_confirm(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let Some(confirm) = &app.confirm else {
+fn draw_prompt(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let Some(prompt) = &app.prompt else {
         return;
     };
 
     let dialog = dialog_in(area, 46, 6);
     frame.render_widget(Clear, dialog);
 
-    // The profile that goes is the fact this box exists for, so it carries the
+    // What would be lost is the fact the box exists for, so it carries the
     // colour kept for what is checked before acting.
-    let mut going = vec![Span::raw("  ")];
-    going.push(Span::styled(
-        format!("#{}", confirm.id),
-        Style::default().fg(HIGHLIGHT).add_modifier(Modifier::BOLD),
-    ));
-    if !confirm.name.is_empty() {
-        going.push(Span::styled(
-            format!(" \"{}\"", confirm.name),
-            Style::default().fg(HIGHLIGHT).add_modifier(Modifier::BOLD),
-        ));
-    }
-
-    let lines = vec![
-        Line::from(going),
-        Line::from(Span::styled(
-            "  is deleted from the board",
-            Style::default().fg(MUTED),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            "  enter delete · esc cancel",
-            Style::default().fg(MUTED),
-        )),
-    ];
+    let (title, lines) = match prompt {
+        Prompt::Delete { id, name } => {
+            let mut going = vec![Span::raw("  ")];
+            going.push(Span::styled(
+                format!("#{id}"),
+                Style::default().fg(HIGHLIGHT).add_modifier(Modifier::BOLD),
+            ));
+            if !name.is_empty() {
+                going.push(Span::styled(
+                    format!(" \"{name}\""),
+                    Style::default().fg(HIGHLIGHT).add_modifier(Modifier::BOLD),
+                ));
+            }
+            (
+                " delete profile? ",
+                vec![
+                    Line::from(going),
+                    Line::from(Span::styled(
+                        "  is deleted from the board",
+                        Style::default().fg(MUTED),
+                    )),
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "  enter delete · esc cancel",
+                        Style::default().fg(MUTED),
+                    )),
+                ],
+            )
+        }
+        // The device holds the values already, and only a save puts them on the
+        // flash: the box names what would be lost with the screen.
+        Prompt::Quit => {
+            let unsaved = app.unsaved();
+            (
+                " save before quitting? ",
+                vec![
+                    Line::from(Span::styled(
+                        format!(
+                            "  {} of the values are not on the flash:",
+                            unsaved.len()
+                        ),
+                        Style::default().fg(MUTED),
+                    )),
+                    Line::from(Span::styled(
+                        format!("  {}", unsaved.join(", ")),
+                        Style::default().fg(HIGHLIGHT),
+                    )),
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "  s save · d discard · esc cancel",
+                        Style::default().fg(MUTED),
+                    )),
+                ],
+            )
+        }
+    };
     frame.render_widget(
-        Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title(" delete profile? ")),
+        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title)),
         dialog,
     );
 }
@@ -449,57 +485,50 @@ fn draw_header(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 }
 
 /// The values the item in focus can take, the one it holds marked.
-fn draw_options(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let (key, choices, current) = app.options();
-    let title = if key.is_empty() {
-        " choices ".to_string()
-    } else {
-        format!(" choices · {key} ")
-    };
-    let block = Block::default().borders(Borders::ALL).title(title);
-
-    if choices.is_empty() {
-        // A domain line holds keys rather than a value, and what the reader can
-        // do with it is the fold: the hint says so where the choices would be.
-        let hint = match app.pane {
-            Pane::Keys => match app.rows().get(app.selected) {
-                Some(crate::app::Row::Group { keys, .. }) => {
-                    format!(" {} · enter goes in", key_count(*keys))
-                }
-                Some(crate::app::Row::Key(row)) => match app.keys.get(*row) {
-                    Some(key) => format!(" a number in {}..{}", key.min, key.max),
-                    None => " nothing to choose here".to_string(),
-                },
-                None => " nothing to choose here".to_string(),
-            },
-            Pane::Remap => match app.remap_key() {
-                Some(key) => format!(" a number in {}..{}", key.min, key.max),
-                None => " nothing to choose here".to_string(),
-            },
-            _ => " nothing to choose here".to_string(),
-        };
-        frame.render_widget(
-            Paragraph::new(hint)
-                .style(Style::default().fg(MUTED))
-                .block(block),
-            area,
-        );
-        return;
+/// What the line in focus is and what it is for. The values it may take are
+/// read where they are written, in the box a value is typed in, so this column
+/// is free to say what the value means.
+fn draw_about(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    // The column is narrow, so the name of the line in focus is what the title
+    // cannot carry: it opens the body, in the colour kept for what is read
+    // before acting, and the account of it follows.
+    let (name, text) = app.about();
+    let mut lines = Vec::new();
+    if !name.is_empty() {
+        lines.push(Line::from(Span::styled(
+            name,
+            Style::default().fg(HIGHLIGHT).add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(""));
     }
+    if !text.is_empty() {
+        lines.push(Line::from(Span::styled(text, Style::default().fg(MUTED))));
+    }
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .block(Block::default().borders(Borders::ALL).title(" info ")),
+        area,
+    );
+}
 
-    let items: Vec<ListItem> = choices
+/// What the screen has said and done, newest at the bottom: the status line
+/// carries one line, and this one carries the run of them.
+fn draw_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let block = Block::default().borders(Borders::ALL).title(" log ");
+    let room = usize::from(block.inner(area).height);
+    let shown: Vec<Line> = app
+        .log
         .iter()
-        .map(|(name, number)| {
-            let held = Some(*number) == current;
-            let label = format!("{}{} ({})", if held { "→ " } else { "  " }, name, number);
-            ListItem::new(label).style(if held {
-                Style::default().fg(ACCENT)
-            } else {
-                Style::default()
-            })
-        })
+        .rev()
+        .take(room)
+        .rev()
+        .map(|line| Line::from(Span::styled(line.clone(), Style::default())))
         .collect();
-    frame.render_widget(List::new(items).block(block), area);
+    frame.render_widget(
+        Paragraph::new(shown).block(block),
+        area,
+    );
 }
 
 fn draw_sources(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {

@@ -18,7 +18,7 @@ use ratatui::crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 
-use app::{App, HUE_STEP, Pane};
+use app::{App, HUE_STEP, Pane, Prompt};
 
 fn main() -> io::Result<()> {
     let mut app = App::new();
@@ -75,7 +75,7 @@ fn argument(name: &str) -> Option<String> {
 fn print_frame(app: &App) -> io::Result<()> {
     use std::io::Write;
 
-    let backend = ratatui::backend::TestBackend::new(100, 40);
+    let backend = ratatui::backend::TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend)?;
     terminal.draw(|frame| ui::draw(frame, app))?;
 
@@ -106,12 +106,20 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
 
 /// Acts on one key press, and answers whether the program ends.
 fn handle(app: &mut App, code: KeyCode) -> bool {
-    // A delete is answered before anything else is read: the box holds until
-    // one of its two answers is given.
-    if app.confirm.is_some() {
-        match code {
-            KeyCode::Enter => act(app, |app| app.confirm_delete()),
-            KeyCode::Esc | KeyCode::Char('n') => app.cancel_delete(),
+    // A question is answered before anything else is read: the box holds until
+    // one of its answers is given.
+    if let Some(question) = app.prompt.clone() {
+        match (question, code) {
+            (Prompt::Delete { .. }, KeyCode::Enter) => act(app, |app| app.confirm_delete()),
+            (Prompt::Delete { .. }, KeyCode::Esc | KeyCode::Char('n')) => app.cancel_prompt(),
+            // Leaving with values the flash does not hold: the box asks first,
+            // and a save writes them before the screen goes.
+            (Prompt::Quit, KeyCode::Char('s')) => {
+                act(app, |app| app.save());
+                return true;
+            }
+            (Prompt::Quit, KeyCode::Char('d')) => return true,
+            (Prompt::Quit, KeyCode::Esc | KeyCode::Char('n')) => app.cancel_prompt(),
             _ => {}
         }
         return false;
@@ -135,7 +143,14 @@ fn handle(app: &mut App, code: KeyCode) -> bool {
     }
 
     match code {
-        KeyCode::Char('q') => return true,
+        // Nothing a save would carry is left behind, so `q` is the answer; a
+        // change that is only on the device is put to the reader first.
+        KeyCode::Char('q') => {
+            if app.unsaved().is_empty() {
+                return true;
+            }
+            act(app, |app| app.ask_quit());
+        }
         KeyCode::Tab => {
             app.pane = match app.pane {
                 Pane::Sources => Pane::Keys,
@@ -181,6 +196,9 @@ fn act(app: &mut App, action: fn(&mut App) -> Result<(), String>) {
     if let Err(error) = action(app) {
         app.error = Some(error);
     }
+    // Whatever was said goes into the log, where the line after it cannot
+    // cover it up.
+    app.note();
 }
 
 /// Moves the selection of the pane in focus.
