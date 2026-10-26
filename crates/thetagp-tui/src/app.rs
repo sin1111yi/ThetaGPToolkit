@@ -66,6 +66,16 @@ pub enum Target {
     ProfileName(usize),
 }
 
+/// A delete the screen asks about before it is done: a board's profiles are not
+/// a file that can be restored, so what goes is named before it goes.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Confirm {
+    /// The profile the delete would take.
+    pub id: u32,
+    /// The name its body carries, so the box says what is lost.
+    pub name: String,
+}
+
 /// A value being typed.
 pub struct Editing {
     pub target: Target,
@@ -127,8 +137,8 @@ pub struct App {
 
     pub profiles: Vec<ProfileEntry>,
     pub profile_selected: usize,
-    /// The profile a first `x` asked to delete; a second one deletes it.
-    pub pending_delete: Option<u32>,
+    /// The delete the screen is asking about, and the profile it would take.
+    pub confirm: Option<Confirm>,
 
     pub snapshot: Option<String>,
     pub pane: Pane,
@@ -153,7 +163,7 @@ impl App {
             remap_selected: 0,
             profiles: Vec::new(),
             profile_selected: 0,
-            pending_delete: None,
+            confirm: None,
             snapshot: None,
             pane: Pane::Keys,
             message: String::new(),
@@ -681,27 +691,38 @@ impl App {
     }
 
     /// Deletes the profile in the list, once a second `x` confirms it.
-    pub fn delete_profile(&mut self) -> Result<(), String> {
+    /// Asks, in a box, before deleting the profile in focus.
+    pub fn ask_delete(&mut self) -> Result<(), String> {
         let Some(entry) = self.profiles.get(self.profile_selected).cloned() else {
             return Ok(());
         };
         if entry.id == 0 {
             return Err("the factory profile is the board's own and is not deleted".into());
         }
-        if self.pending_delete != Some(entry.id) {
-            self.pending_delete = Some(entry.id);
-            self.message = format!("press x again to delete profile #{}", entry.id);
-            return Ok(());
-        }
+        self.confirm = Some(Confirm {
+            id: entry.id,
+            name: entry.name.clone(),
+        });
+        Ok(())
+    }
 
-        self.call("session.profile_delete", json!({ "id": entry.id }))?;
-        self.pending_delete = None;
-        self.message = format!("profile #{} deleted", entry.id);
+    /// Deletes the profile the box asks about.
+    pub fn confirm_delete(&mut self) -> Result<(), String> {
+        let Some(confirm) = self.confirm.take() else {
+            return Ok(());
+        };
+
+        self.call("session.profile_delete", json!({ "id": confirm.id }))?;
+        self.message = format!("profile #{} deleted", confirm.id);
         self.refresh()?;
         if self.profile_selected >= self.profiles.len() {
             self.profile_selected = self.profiles.len().saturating_sub(1);
         }
         Ok(())
+    }
+
+    pub fn cancel_delete(&mut self) {
+        self.confirm = None;
     }
 
     pub fn take_snapshot(&mut self) -> Result<(), String> {
@@ -1008,11 +1029,64 @@ mod tests {
         assert_eq!(app.profiles.len(), 2, "the new profile is listed beside the factory one");
         assert!(app.message.contains("created"), "{}", app.message);
 
-        app.delete_profile().expect("a delete is asked for");
-        assert!(app.pending_delete.is_some(), "the first press asks");
-        app.delete_profile().expect("the delete is confirmed");
+        app.ask_delete().expect("a delete is asked about");
+        assert!(
+            app.confirm.as_ref().is_some_and(|confirm| confirm.id == 1),
+            "the box names the profile it would take"
+        );
+        app.confirm_delete().expect("the delete is answered");
         assert_eq!(app.profiles.len(), 1, "the profile is gone, the factory one stays");
         assert_eq!(app.profiles[0].id, 0);
+    }
+
+    #[test]
+    fn a_delete_is_asked_about_in_a_box_before_the_profile_goes() {
+        let mut app = App::at(daemon_on_sim());
+        app.refresh().expect("a state");
+        app.create_profile().expect("a profile is written");
+        app.pane = Pane::Profiles;
+        app.profile_selected = 1;
+        let before = app.profiles.len();
+
+        app.ask_delete().expect("a delete is asked about");
+        let boxed = screen(&app);
+        assert!(
+            boxed.contains("delete profile?"),
+            "the question is asked in a box"
+        );
+        assert!(
+            boxed.contains("is deleted from the board")
+                && boxed.contains("enter delete · esc cancel"),
+            "and names both answers"
+        );
+        assert_eq!(
+            app.profiles.len(),
+            before,
+            "nothing goes until the box is answered"
+        );
+
+        app.confirm_delete().expect("the delete is answered");
+        assert_eq!(app.profiles.len(), before - 1, "the profile goes");
+        assert!(app.confirm.is_none(), "and the box is gone with it");
+    }
+
+    #[test]
+    fn a_delete_that_is_not_answered_keeps_the_profile() {
+        let mut app = App::at(daemon_on_sim());
+        app.refresh().expect("a state");
+        app.create_profile().expect("a profile is written");
+        app.pane = Pane::Profiles;
+        app.profile_selected = 1;
+        let before = app.profiles.len();
+
+        app.ask_delete().expect("a delete is asked about");
+        app.cancel_delete();
+        assert!(app.confirm.is_none(), "the box is closed");
+        assert_eq!(app.profiles.len(), before, "and the profile stays");
+        assert!(
+            !screen(&app).contains("delete profile?"),
+            "nothing of the box is left on the screen"
+        );
     }
 
     #[test]

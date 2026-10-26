@@ -106,6 +106,17 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
 
 /// Acts on one key press, and answers whether the program ends.
 fn handle(app: &mut App, code: KeyCode) -> bool {
+    // A delete is answered before anything else is read: the box holds until
+    // one of its two answers is given.
+    if app.confirm.is_some() {
+        match code {
+            KeyCode::Enter => act(app, |app| app.confirm_delete()),
+            KeyCode::Esc | KeyCode::Char('n') => app.cancel_delete(),
+            _ => {}
+        }
+        return false;
+    }
+
     if app.editing.is_some() {
         match code {
             KeyCode::Enter => act(app, |app| app.commit_edit()),
@@ -147,7 +158,7 @@ fn handle(app: &mut App, code: KeyCode) -> bool {
         KeyCode::Char('n') => act(app, |app| app.create_profile()),
         KeyCode::Char('e') if app.pane == Pane::Profiles => act(app, |app| app.begin_edit()),
         // The delete keeps its own pending state: the same key confirms it.
-        KeyCode::Char('x') => act_keeping_pending(app, |app| app.delete_profile()),
+        KeyCode::Char('x') => act(app, |app| app.ask_delete()),
         KeyCode::Char('t') => act(app, |app| app.take_snapshot()),
         KeyCode::Char('r') => act(app, |app| app.restore_snapshot()),
         KeyCode::Char('R') => act(app, |app| app.refresh()),
@@ -157,12 +168,6 @@ fn handle(app: &mut App, code: KeyCode) -> bool {
 }
 
 fn act(app: &mut App, action: fn(&mut App) -> Result<(), String>) {
-    act_keeping_pending(app, action);
-    // A delete is confirmed by the same key twice: anything else drops it.
-    app.pending_delete = None;
-}
-
-fn act_keeping_pending(app: &mut App, action: fn(&mut App) -> Result<(), String>) {
     app.error = None;
     if let Err(error) = action(app) {
         app.error = Some(error);

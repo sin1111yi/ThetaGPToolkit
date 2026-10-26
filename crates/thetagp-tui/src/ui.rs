@@ -33,6 +33,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     // The choices column stays whole: the box a value is typed in sits over the
     // device alone, so what the value may be is read beside it.
     draw_edit(frame, app, columns[0]);
+    draw_confirm(frame, app, columns[0]);
 }
 
 fn draw_body(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -116,12 +117,7 @@ fn draw_edit(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let screen = area;
     let width = screen.width.saturating_sub(2).clamp(24, 46);
     let height = if choices.is_empty() { 6 } else { 12 }.min(screen.height);
-    let dialog = ratatui::layout::Rect {
-        x: screen.x + (screen.width.saturating_sub(width)) / 2,
-        y: screen.y + (screen.height.saturating_sub(height)) / 2,
-        width,
-        height,
-    };
+    let dialog = dialog_in(screen, width, height);
     frame.render_widget(Clear, dialog);
     let block = Block::default().borders(Borders::ALL).title(title);
     let inner = block.inner(dialog);
@@ -207,6 +203,62 @@ fn draw_edit(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             Style::default().fg(MUTED),
         ))),
         rows[2],
+    );
+}
+
+/// A box over the device's column, centred in it: the panes it is read against
+/// keep their own space.
+fn dialog_in(area: ratatui::layout::Rect, width: u16, height: u16) -> ratatui::layout::Rect {
+    let width = width.min(area.width);
+    let height = height.min(area.height);
+    ratatui::layout::Rect {
+        x: area.x + (area.width.saturating_sub(width)) / 2,
+        y: area.y + (area.height.saturating_sub(height)) / 2,
+        width,
+        height,
+    }
+}
+
+/// The question `x` asks before a profile goes: the board keeps its profiles
+/// itself, so what would be lost is named before it is lost.
+fn draw_confirm(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let Some(confirm) = &app.confirm else {
+        return;
+    };
+
+    let dialog = dialog_in(area, 46, 6);
+    frame.render_widget(Clear, dialog);
+
+    // The profile that goes is the fact this box exists for, so it carries the
+    // colour kept for what is checked before acting.
+    let mut going = vec![Span::raw("  ")];
+    going.push(Span::styled(
+        format!("#{}", confirm.id),
+        Style::default().fg(HIGHLIGHT).add_modifier(Modifier::BOLD),
+    ));
+    if !confirm.name.is_empty() {
+        going.push(Span::styled(
+            format!(" \"{}\"", confirm.name),
+            Style::default().fg(HIGHLIGHT).add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    let lines = vec![
+        Line::from(going),
+        Line::from(Span::styled(
+            "  is deleted from the board",
+            Style::default().fg(MUTED),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  enter delete · esc cancel",
+            Style::default().fg(MUTED),
+        )),
+    ];
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(Block::default().borders(Borders::ALL).title(" delete profile? ")),
+        dialog,
     );
 }
 
@@ -544,7 +596,7 @@ fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // terminal: they are written on two.
     let help = vec![
         Line::from(Span::styled(
-            "  tab pane · enter connect / edit a value / activate a profile · n new profile · e name it · x delete (twice)",
+            "  tab pane · enter connect / edit a value / activate a profile · n new profile · e name it · x delete",
             Style::default(),
         )),
         Line::from(Span::styled(
