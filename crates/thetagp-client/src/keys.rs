@@ -90,6 +90,10 @@ pub struct Key {
     pub count: u32,
     /// Whether a change to the key takes effect at the next boot.
     pub reboot: bool,
+    /// Whether the key also takes the sentinel byte, 255, for "nothing here"
+    /// -- a remap slot a board does not wire. It lies outside the range above.
+    #[serde(default)]
+    pub accepts_unmapped: bool,
     /// The schema enum the value is drawn from, when its numbers stand for
     /// names: `SOCDMode` for a key whose values are that enum's. `None` for a
     /// key whose value is a plain number.
@@ -134,6 +138,7 @@ impl KeySpace {
                 max: entry.max,
                 count: entry.count,
                 reboot: entry.reboot,
+                accepts_unmapped: entry.accepts_unmapped,
                 value_enum: (!entry.value_enum.is_empty())
                     .then(|| entry.value_enum.clone()),
             });
@@ -186,7 +191,8 @@ impl KeySpace {
 
         match (key.kind.is_array(), value) {
             (false, Value::Scalar(number)) => {
-                if *number < i64::from(key.min) || *number > i64::from(key.max) {
+                let sentinel = key.accepts_unmapped && *number == UNMAPPED_SENTINEL;
+                if !sentinel && (*number < i64::from(key.min) || *number > i64::from(key.max)) {
                     return Err(Reject::OutOfRange {
                         key: name.to_string(),
                         min: key.min,
@@ -205,7 +211,11 @@ impl KeySpace {
                     });
                 }
                 for (at, element) in elements.iter().enumerate() {
-                    if *element < key.min || *element > key.max {
+                    // A slot a board does not wire holds the sentinel, which the
+                    // key accepts beside the range it declares.
+                    let sentinel =
+                        key.accepts_unmapped && i64::from(*element) == UNMAPPED_SENTINEL;
+                    if !sentinel && (*element < key.min || *element > key.max) {
                         return Err(Reject::ElementOutOfRange {
                             key: name.to_string(),
                             at,
@@ -222,6 +232,10 @@ impl KeySpace {
         }
     }
 }
+
+/// The byte a field carries for "nothing here": a remap slot a board does not
+/// wire. It lies outside a key's range and is read beside it.
+pub const UNMAPPED_SENTINEL: i64 = 0xFF;
 
 /// Why a value is not one a key may hold.
 #[derive(Clone, PartialEq, Eq, Debug)]

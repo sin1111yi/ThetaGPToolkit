@@ -499,16 +499,30 @@ impl ConfigStore {
 /// The keys the simulated device declares.
 fn declared_keys() -> Vec<proto::ConfigKeyEntry> {
     vec![
-        entry("map.socd", 0, 3, proto::ConfigKeyType::ConfigKeyU8, 0, true, "SOCDMode"),
         entry(
-            "map.btn_map",
+            "map.socd",
             0,
-            31,
-            proto::ConfigKeyType::ConfigKeyU8Array,
-            8,
-            false,
-            "GamepadButton",
+            3,
+            proto::ConfigKeyType::ConfigKeyU8,
+            0,
+            true,
+            "SOCDMode",
         ),
+        // The one key that also takes the sentinel: a remap slot a board does
+        // not wire holds 255.
+        {
+            let mut table = entry(
+                "map.btn_map",
+                0,
+                31,
+                proto::ConfigKeyType::ConfigKeyU8Array,
+                8,
+                false,
+                "GamepadButton",
+            );
+            table.accepts_unmapped = true;
+            table
+        },
         entry(
             "led.bri",
             0,
@@ -556,6 +570,7 @@ fn entry(
         r#type: kind as i32,
         count,
         value_enum: value_enum.to_string(),
+        accepts_unmapped: false,
     }
 }
 

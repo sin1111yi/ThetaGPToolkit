@@ -118,6 +118,7 @@ mod tests {
             max: 4,
             count: 1,
             reboot: false,
+            accepts_unmapped: false,
             value_enum: Some("SOCDMode".into()),
         };
         assert_eq!(value(&key, 0), "UpPriority (0)");
