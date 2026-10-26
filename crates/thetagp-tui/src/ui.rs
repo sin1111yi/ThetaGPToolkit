@@ -291,7 +291,9 @@ fn draw_profiles(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let message = match &app.error {
         Some(error) => Span::styled(format!(" {error}"), Style::default().fg(Color::Red)),
-        None => Span::styled(format!(" {}", app.message), Style::default().fg(MUTED)),
+        // What the device said is the board talking back: it reads in the
+        // window's own blue, and a failure in red.
+        None => Span::styled(format!(" {}", app.message), Style::default().fg(ACCENT)),
     };
     // The keys are a line a reader scans, and the whole of them is wider than a
     // terminal: they are written on two.
