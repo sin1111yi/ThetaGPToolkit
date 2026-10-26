@@ -243,10 +243,16 @@ impl App {
         let config = self.call("session.config", json!({}))?;
         self.values = serde_json::from_value(config).map_err(|error| error.to_string())?;
 
-        let profiles = self.call("session.profiles", json!({}))?;
-        let listed: Profiles =
-            serde_json::from_value(profiles).map_err(|error| error.to_string())?;
-        self.profiles = listed.profiles;
+        // A board with no flash keeps no profiles, and its firmware does not
+        // carry the arm that lists them: an empty list is what it has.
+        match self.call("session.profiles", json!({})) {
+            Ok(profiles) => {
+                let listed: Profiles =
+                    serde_json::from_value(profiles).map_err(|error| error.to_string())?;
+                self.profiles = listed.profiles;
+            }
+            Err(_) => self.profiles.clear(),
+        }
 
         // A level the device no longer has is one the reader cannot stand on:
         // the path backs out until it names what the device declares.
@@ -742,6 +748,9 @@ impl App {
             } else {
                 format!("saved; the device would not keep {dropped} of the values")
             }
+        } else if !self.keeps_profiles() {
+            // Nothing to write into: the board carries no profiles.
+            "this board keeps no profiles; the values live in it until it restarts".into()
         } else {
             "the device did not write the configuration".into()
         };
@@ -888,6 +897,12 @@ impl App {
         Ok(())
     }
 
+    /// Whether the device has anywhere to keep a change: a board with no flash
+    /// carries no profiles, so a save writes nothing and a quit loses nothing.
+    pub fn keeps_profiles(&self) -> bool {
+        !self.profiles.is_empty()
+    }
+
     /// The keys whose value is not the one the profile holds on the flash.
     pub fn unsaved(&self) -> Vec<String> {
         let mut names: Vec<String> = self
@@ -902,7 +917,7 @@ impl App {
 
     /// Asks, in a box, whether to save before the screen goes.
     pub fn ask_quit(&mut self) -> Result<(), String> {
-        if self.unsaved().is_empty() {
+        if !self.keeps_profiles() || self.unsaved().is_empty() {
             return Ok(());
         }
         self.prompt = Some(Prompt::Quit);
@@ -1444,6 +1459,26 @@ mod tests {
             return;
         }
         panic!("no help line carries `n new profile`");
+    }
+
+    #[test]
+    fn a_board_with_no_flash_keeps_no_profiles_and_is_not_asked_to_save() {
+        let mut app = App::at(daemon_on_sim());
+        app.refreshed().expect("a state");
+        // The simulated board has a flash; take its profiles away, which is
+        // what a device without one answers.
+        app.profiles.clear();
+        select(&mut app, "led.bri");
+        app.begin_edit().expect("the key is editable");
+        app.edit_push('9');
+        app.commit_edit().expect("the value is written");
+
+        assert!(app.unsaved().len() == 1, "the write is only on the device");
+        app.ask_quit().expect("nothing to ask");
+        assert!(
+            app.prompt.is_none(),
+            "a board with nowhere to save is not asked to"
+        );
     }
 
     #[test]

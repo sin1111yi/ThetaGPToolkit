@@ -150,7 +150,8 @@ fn handle(app: &mut App, code: KeyCode) -> bool {
         // Nothing a save would carry is left behind, so `q` is the answer; a
         // change that is only on the device is put to the reader first.
         KeyCode::Char('q') => {
-            if app.unsaved().is_empty() {
+            // A board that keeps no profiles has nothing a save would carry.
+            if app.unsaved().is_empty() || !app.keeps_profiles() {
                 return true;
             }
             act(app, |app| app.ask_quit());
