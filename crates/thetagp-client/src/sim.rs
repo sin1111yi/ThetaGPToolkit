@@ -503,7 +503,7 @@ fn declared_keys() -> Vec<proto::ConfigKeyEntry> {
         entry(
             "map.btn_map",
             0,
-            32,
+            31,
             proto::ConfigKeyType::ConfigKeyU8Array,
             8,
             false,

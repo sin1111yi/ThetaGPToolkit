@@ -305,20 +305,11 @@ impl App {
                     Some(Value::Array(run)) => run.first().copied(),
                     None => None,
                 };
-                let choices = key
-                    .value_enum
-                    .as_deref()
-                    .map(thetagp_proto::enum_values)
-                    .unwrap_or_default();
-                (key.name.clone(), choices, current)
+                (key.name.clone(), choices_of(key), current)
             }
             Pane::Remap => {
                 let current = self.remap_text(self.remap_selected).parse::<i32>().ok();
-                let choices = self
-                    .remap_key()
-                    .and_then(|key| key.value_enum.as_deref())
-                    .map(thetagp_proto::enum_values)
-                    .unwrap_or_default();
+                let choices = self.remap_key().map(choices_of).unwrap_or_default();
                 ("map.btn_map".to_string(), choices, current)
             }
             Pane::Profiles => ("profiles".to_string(), Vec::new(), None),
@@ -618,6 +609,34 @@ impl App {
     }
 }
 
+
+/// The values a key's field can take, as a reader scans them: the ones its enum
+/// names, and, while the key's range is short enough to read, the ones it does
+/// not name -- a remap slot feeds any index the key accepts, whether or not the
+/// schema has a word for it.
+fn choices_of(key: &Key) -> Vec<(String, i32)> {
+    let mut choices = key
+        .value_enum
+        .as_deref()
+        .map(thetagp_proto::enum_values)
+        .unwrap_or_default();
+    if choices.is_empty() {
+        return choices;
+    }
+
+    let span = key.max.saturating_sub(key.min);
+    if !(0..=64).contains(&span) {
+        return choices;
+    }
+    for number in key.min..=key.max {
+        if !choices.iter().any(|(_, value)| *value == number) {
+            choices.push((number.to_string(), number));
+        }
+    }
+    choices.sort_by_key(|(_, number)| *number);
+    choices
+}
+
 /// The daemon that owns the device, started beside this binary when none runs.
 fn daemon() -> Result<Client, String> {
     if let Ok(client) = Client::connect() {
@@ -792,6 +811,22 @@ mod tests {
             choices.iter().any(|(name, number)| name == "GENERIC" && *number == 14),
             "the mode the device is in is among them: {choices:?}"
         );
+    }
+
+    #[test]
+    fn a_remap_slot_offers_every_index_the_key_accepts() {
+        let mut app = App::at(daemon_on_sim());
+        app.refresh().expect("a state");
+        app.pane = Pane::Remap;
+
+        let (_, choices, _) = app.options();
+        assert_eq!(choices.len(), 33, "0..31 and the one that feeds nothing");
+        assert!(choices.iter().any(|(name, number)| *number == 0 && name == "B1"));
+        assert!(
+            choices.iter().any(|(name, number)| *number == 24 && name == "24"),
+            "an index the schema does not name is still offered"
+        );
+        assert!(choices.iter().any(|(name, number)| *number == 255 && name == "Unmapped"));
     }
 
     #[test]
