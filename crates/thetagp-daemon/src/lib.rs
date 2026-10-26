@@ -129,6 +129,25 @@ impl Service {
                 self.disconnect();
                 Ok(json!({}))
             }
+            "session.log" => self.with(|session| {
+                let since = request
+                    .pointer("/params/since")
+                    .and_then(Json::as_u64)
+                    .unwrap_or(0) as u32;
+                let answer = session.log(since).map_err(|error| error.to_string())?;
+                Ok(json!({
+                    "total": answer.total,
+                    "lines": answer
+                        .lines
+                        .iter()
+                        .map(|line| json!({
+                            "seq": line.seq,
+                            "level": line.level,
+                            "text": line.text,
+                        }))
+                        .collect::<Vec<_>>(),
+                }))
+            }),
             "session.version" => self.with(|session| {
                 let named = session.fw_version().map_err(|error| error.to_string())?;
                 Ok(json!({

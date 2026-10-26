@@ -514,23 +514,58 @@ fn draw_about(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     );
 }
 
-/// What the screen has said and done, newest at the bottom: the status line
-/// carries one line, and this one carries the run of them.
+/// The lines the firmware logged, broken to the panel's width: what the device
+/// said as it ran, newest at the bottom, with the level it said it at.
 fn draw_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let block = Block::default().borders(Borders::ALL).title(" log ");
     let room = usize::from(block.inner(area).height);
-    let shown: Vec<Line> = app
-        .log
-        .iter()
-        .rev()
-        .take(room)
-        .rev()
-        .map(|line| Line::from(Span::styled(line.clone(), Style::default())))
-        .collect();
-    frame.render_widget(
-        Paragraph::new(shown).block(block),
-        area,
-    );
+    let width = usize::from(area.width.saturating_sub(2)).max(8);
+
+    // The level a line was written at survives as the mark the reader put in
+    // front of it: a failure is red, a warning amber.
+    let style_of = |line: &str| match line.split(' ').next() {
+        Some("E") => Style::default().fg(Color::Red),
+        Some("W") => Style::default().fg(HIGHLIGHT),
+        Some("D") => Style::default().fg(MUTED),
+        _ => Style::default(),
+    };
+
+    let mut rows: Vec<Line> = Vec::new();
+    for entry in &app.log {
+        let style = style_of(entry);
+        for part in broken_to(entry, width) {
+            rows.push(Line::from(Span::styled(part, style)));
+        }
+    }
+    // The tail is what a reader wants: the rows above it fall off the top.
+    let shown: Vec<Line> = rows.into_iter().rev().take(room).rev().collect();
+    frame.render_widget(Paragraph::new(shown).block(block), area);
+}
+
+/// One line broken to a width, at its spaces where it can be: a word longer
+/// than the panel is cut where the column ends.
+fn broken_to(line: &str, width: usize) -> Vec<String> {
+    let mut rows = Vec::new();
+    let mut row = String::new();
+    for word in line.split(' ').filter(|word| !word.is_empty()) {
+        let mut word = word.to_string();
+        if row.chars().count() + 1 + word.chars().count() > width && !row.is_empty() {
+            rows.push(std::mem::take(&mut row));
+        }
+        while word.chars().count() > width {
+            let cut: String = word.chars().take(width).collect();
+            rows.push(cut);
+            word = word.chars().skip(width).collect();
+        }
+        if !row.is_empty() {
+            row.push(' ');
+        }
+        row.push_str(&word);
+    }
+    if !row.is_empty() {
+        rows.push(row);
+    }
+    rows
 }
 
 fn draw_sources(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {

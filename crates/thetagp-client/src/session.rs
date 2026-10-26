@@ -314,6 +314,15 @@ impl<T: Transport> Session<T> {
     }
 
     /// The device's own readings: load, memory, flash, profiles.
+    /// The lines the firmware logged after `since`, and how many it has written.
+    pub fn log(&mut self, since: u32) -> Result<proto::SysGetLogOk, SessionError> {
+        let reply = self.send(proto::request::Kind::SysGetLog(proto::SysGetLog { since }))?;
+        expect(reply, |kind| match kind {
+            proto::reply::Kind::SysGetLog(ok) => Some(ok),
+            _ => None,
+        })
+    }
+
     pub fn usage(&mut self) -> Result<proto::SysGetUsageOk, SessionError> {
         let reply = self.send(proto::request::Kind::SysGetUsage(proto::SysGetUsage {}))?;
         expect(reply, |kind| match kind {

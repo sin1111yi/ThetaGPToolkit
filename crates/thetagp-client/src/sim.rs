@@ -107,6 +107,26 @@ pub fn common(request: proto::Request) -> Vec<proto::Reply> {
                 build_time: "12:00:00".to_string(),
             })
         }
+        proto::request::Kind::SysGetLog(asked) => {
+            // Two lines, so a reader sees the ring move on as it asks again.
+            let all = [
+                (1, 0, "sim: the board is up"),
+                (2, 0, "sim: nothing is wired to it"),
+            ];
+            let lines: Vec<proto::SysGetLogLine> = all
+                .iter()
+                .filter(|(seq, ..)| *seq > asked.since)
+                .map(|(seq, level, text)| proto::SysGetLogLine {
+                    seq: *seq,
+                    level: *level,
+                    text: text.to_string(),
+                })
+                .collect();
+            proto::reply::Kind::SysGetLog(proto::SysGetLogOk {
+                total: all.len() as u32,
+                lines,
+            })
+        }
         proto::request::Kind::SysGetUsage(_) => {
             proto::reply::Kind::SysGetUsage(proto::SysGetUsageOk {
                 cpu_load_percent: 7,

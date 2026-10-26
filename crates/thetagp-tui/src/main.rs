@@ -42,6 +42,7 @@ fn main() -> io::Result<()> {
     // A frame drawn and written as text: what the screen holds, without a
     // terminal to hold it -- for a log, a test or a machine with no display.
     if std::env::args().any(|argument| argument == "--frame") {
+        app.poll_log().ok();
         return print_frame(&app);
     }
 
@@ -93,6 +94,9 @@ fn print_frame(app: &App) -> io::Result<()> {
 
 fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> io::Result<()> {
     loop {
+        // The device logs as it runs, not only when a key is pressed: the log
+        // is read once per turn, and the frame after it shows what it said.
+        app.poll_log().ok();
         terminal.draw(|frame| ui::draw(frame, app))?;
         if event::poll(Duration::from_millis(250))? {
             if let Event::Key(key) = event::read()? {
@@ -196,9 +200,9 @@ fn act(app: &mut App, action: fn(&mut App) -> Result<(), String>) {
     if let Err(error) = action(app) {
         app.error = Some(error);
     }
-    // Whatever was said goes into the log, where the line after it cannot
-    // cover it up.
-    app.note();
+    // The device's own log is read after every act: an action that made the
+    // firmware say something shows it in the same breath.
+    app.poll_log().ok();
 }
 
 /// Moves the selection of the pane in focus.

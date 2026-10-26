@@ -131,14 +131,11 @@ pub struct App {
 
     pub profiles: Vec<ProfileEntry>,
     pub profile_selected: usize,
-    /// What the screen has said and done, oldest first: a line the reader can
-    /// look back at after the status line has moved on.
+    /// The lines the firmware logged, oldest first: what the device said as it
+    /// ran, read off the wire rather than a serial port.
     pub log: Vec<String>,
-    /// The last line taken into the log, so a message already there is not
-    /// written twice.
-    noted: String,
-    /// When the screen opened, for the seconds the log counts from.
-    opened: std::time::Instant,
+    /// The last line number the screen holds: the next read starts after it.
+    pub log_seq: u32,
 
     /// The question the screen is asking, if it is asking one.
     pub prompt: Option<Prompt>,
@@ -169,8 +166,7 @@ impl App {
             profiles: Vec::new(),
             profile_selected: 0,
             log: Vec::new(),
-            noted: String::new(),
-            opened: std::time::Instant::now(),
+            log_seq: 0,
             prompt: None,
             snapshot: None,
             pane: Pane::Keys,
@@ -200,7 +196,7 @@ impl App {
         if self.connected.is_none() {
             self.pane = Pane::Sources;
         }
-        self.note();
+        self.poll_log().ok();
     }
 
     fn sources_now(&mut self) -> Result<(), String> {
@@ -288,7 +284,7 @@ impl App {
         // reader lands, rather than the list of sources they just left.
         self.pane = Pane::Keys;
         self.refreshed()?;
-        self.note();
+        self.poll_log().ok();
         Ok(())
     }
 
@@ -786,23 +782,47 @@ impl App {
     }
 
     /// Deletes the profile in the list, once a second `x` confirms it.
-    /// Takes what the screen last said into the log, once: a message that is
-    /// still the one on the status line is not a new line.
-    pub fn note(&mut self) {
-        let line = match &self.error {
-            Some(error) => error.clone(),
-            None => self.message.clone(),
-        };
-        if line.is_empty() || line == self.noted {
-            return;
+    /// Reads the lines the firmware has logged since the screen last asked, and
+    /// keeps them. A read that fails is not a line of the device's log, so it is
+    /// left to the status line.
+    pub fn poll_log(&mut self) -> Result<(), String> {
+        if self.client.is_none() {
+            return Ok(());
         }
-        self.noted = line.clone();
-        let seconds = self.opened.elapsed().as_secs_f32();
-        self.log.push(format!("{seconds:>6.1}s {line}"));
-        // The log is a window on what just happened, not an archive.
-        if self.log.len() > 200 {
-            self.log.remove(0);
+        let mut answer = self.call("session.log", json!({ "since": self.log_seq }))?;
+        let total = answer.get("total").and_then(Json::as_u64).unwrap_or(0) as u32;
+        if total < self.log_seq {
+            // The device restarted: its count began again, and the lines the
+            // screen holds are from a run that is over. The read that noticed
+            // it was asked from a number the new run never reached, so the run
+            // is read from its first line.
+            self.log.clear();
+            self.log_seq = 0;
+            answer = self.call("session.log", json!({ "since": 0 }))?;
         }
+        let mut newest = self.log_seq;
+        if let Some(lines) = answer.get("lines").and_then(Json::as_array) {
+            for line in lines {
+                let text = line.get("text").and_then(Json::as_str).unwrap_or_default();
+                let level = line.get("level").and_then(Json::as_u64).unwrap_or(0);
+                let mark = match level {
+                    1 => "W ",
+                    2 => "E ",
+                    3 => "D ",
+                    _ => "I ",
+                };
+                self.log.push(format!("{mark}{}", text.trim_end()));
+                newest = line.get("seq").and_then(Json::as_u64).unwrap_or(0) as u32;
+            }
+        }
+        if self.log.len() > 500 {
+            let drop = self.log.len() - 500;
+            self.log.drain(..drop);
+        }
+        // A reply carries a few lines, not every one the device holds: the next
+        // read starts after the last line this one carried, so the rest follow.
+        self.log_seq = newest;
+        Ok(())
     }
 
     /// What the item in focus is, and what it is for: the line the screen reads
@@ -1398,6 +1418,53 @@ mod tests {
             Some(&ratatui::style::Color::Rgb(0, 255, 255)),
             "and full saturation is the hue the profile carries"
         );
+    }
+
+    #[test]
+    fn the_log_is_the_lines_the_device_wrote() {
+        let mut app = App::at(daemon_on_sim());
+        app.refreshed().expect("a state");
+        app.poll_log().expect("the device answers");
+
+        assert_eq!(
+            app.log,
+            vec![
+                "I sim: the board is up".to_string(),
+                "I sim: nothing is wired to it".to_string()
+            ],
+            "the lines the device kept, with the level it wrote them at"
+        );
+        assert_eq!(app.log_seq, 2, "and the number the next read starts after");
+
+        app.poll_log().expect("the device answers again");
+        assert_eq!(app.log.len(), 2, "a line already held is not written twice");
+    }
+
+    #[test]
+    fn a_restarted_device_drops_the_lines_of_the_run_before() {
+        let mut app = App::at(daemon_on_sim());
+        app.refreshed().expect("a state");
+        app.poll_log().expect("the device answers");
+        app.log.push("I a line from a run that is over".to_string());
+        app.log_seq = 99;
+
+        app.poll_log().expect("the device answers");
+        assert!(
+            !app.log.iter().any(|line| line.contains("run that is over")),
+            "the count began again, so what it held is gone"
+        );
+        assert_eq!(app.log_seq, 2, "and the new run's lines are read from zero");
+    }
+
+    #[test]
+    fn the_log_is_drawn_beside_the_device() {
+        let mut app = App::at(daemon_on_sim());
+        app.refreshed().expect("a state");
+        app.poll_log().expect("the device answers");
+
+        let text = screen(&app);
+        assert!(text.contains(" log "), "the panel is on the screen: {}", text.lines().count());
+        assert!(text.contains("sim: the board is up"), "with what the device said");
     }
 
     #[test]
