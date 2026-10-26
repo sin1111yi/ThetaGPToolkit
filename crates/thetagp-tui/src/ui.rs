@@ -14,11 +14,13 @@ use thetagp_client::KeyType;
 use crate::app::{App, Pane, Prompt, Target};
 use crate::labels;
 
+// The palette, one meaning each: blue is what is being written, amber is what a
+// reader checks before acting, green is the key to press, grey is what is only
+// there to be read.
 pub(crate) const ACCENT: Color = Color::Rgb(90, 156, 255);
-pub(crate) const MUTED: Color = Color::Rgb(139, 146, 156);
-// What a reader checks before acting -- the button a value goes into, the profile
-// a change lands in -- is set apart from the blue of what is being written.
 pub(crate) const HIGHLIGHT: Color = Color::Rgb(232, 176, 96);
+pub(crate) const KEY: Color = Color::Rgb(126, 200, 140);
+pub(crate) const MUTED: Color = Color::Rgb(139, 146, 156);
 
 pub fn draw(frame: &mut Frame, app: &App) {
     // The device on the left, what the line in focus means in a narrow column
@@ -340,8 +342,8 @@ fn menu_title(app: &App) -> String {
     format!(" options › {} ", app.path.join(" › "))
 }
 
-/// A run of keys and what each does: the key in the colour of something to
-/// press, the words beside it grey, so the two are told apart at a glance.
+/// A run of keys and what each does: the key in the colour kept for something
+/// to press, the words beside it grey, so the two are told apart at a glance.
 fn keys_line(pairs: &[(&str, &str)]) -> Line<'static> {
     let mut spans = vec![Span::raw("  ")];
     for (at, (key, action)) in pairs.iter().enumerate() {
@@ -350,7 +352,7 @@ fn keys_line(pairs: &[(&str, &str)]) -> Line<'static> {
         }
         spans.push(Span::styled(
             (*key).to_string(),
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            Style::default().fg(KEY).add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(
             format!(" {action}"),

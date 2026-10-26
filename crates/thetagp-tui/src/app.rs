@@ -1433,8 +1433,8 @@ mod tests {
             };
             assert_eq!(
                 buffer[(at as u16, y)].fg,
-                crate::ui::ACCENT,
-                "the key is drawn as a key"
+                crate::ui::KEY,
+                "the key is drawn in the colour kept for one"
             );
             assert_eq!(
                 buffer[(at as u16 + 2, y)].fg,
