@@ -1140,7 +1140,7 @@ mod tests {
             "every name the value may take is in it"
         );
         assert!(
-            boxed.contains("→B1 (4)"),
+            boxed.contains("→ B1 (4)"),
             "the value being typed is the one marked"
         );
 

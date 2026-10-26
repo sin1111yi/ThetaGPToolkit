@@ -5,7 +5,8 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState,
+    Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Scrollbar,
+    ScrollbarOrientation, ScrollbarState, Table, TableState,
 };
 
 use thetagp_client::KeyType;
@@ -71,10 +72,10 @@ fn draw_edit(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let (key, choices, _) = app.options();
     let elements = app.edit_elements();
     let title = match editing.target {
-        Target::Key(_) => format!(" edit · {key} "),
-        Target::Remap(slot) => format!(" edit · input {slot:02} "),
+        Target::Key(_) => format!(" edit \u{00b7} {key} "),
+        Target::Remap(slot) => format!(" edit \u{00b7} input {slot:02} "),
         Target::ProfileName(row) => format!(
-            " edit · profile {} ",
+            " edit \u{00b7} profile {} ",
             app.profiles.get(row).map(|entry| entry.id).unwrap_or(0)
         ),
     };
@@ -105,78 +106,12 @@ fn draw_edit(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let typed: Option<i32> = text.trim().parse().ok();
     let held = typed.or_else(|| app.edit_value());
 
-    // The box keeps to the left column, one column in from its edges.
+    // The box keeps to the device's column and holds a handful of names at a
+    // time: the list scrolls under the value, so a reader picks from the names
+    // around the one held rather than reading a wall of them.
     let screen = area;
-    let width = screen.width.saturating_sub(2).max(20);
-    let inner = usize::from(width.saturating_sub(2));
-
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled(" > ", Style::default().fg(MUTED)),
-            Span::styled(format!("{text}\u{258F}"), Style::default().fg(ACCENT)),
-        ]),
-        Line::from(Span::styled(format!("  {hint}"), Style::default().fg(MUTED))),
-        Line::from(""),
-    ];
-
-    // The choices are packed into a run of rows rather than one per line: the
-    // whole set at once is what makes a number pickable.
-    let mut rows: Vec<Vec<(String, bool)>> = Vec::new();
-    let mut row: Vec<(String, bool)> = Vec::new();
-    let mut used = 0;
-    for (name, number) in &choices {
-        // The one held is marked in the run itself, so a monochrome terminal
-        // reads it too.
-        let label = format!(
-            "{}{name} ({number})",
-            if Some(*number) == held { "\u{2192}" } else { " " }
-        );
-        let length = label.chars().count();
-        if !row.is_empty() && used + 2 + length > inner.saturating_sub(3) {
-            rows.push(std::mem::take(&mut row));
-            used = 0;
-        }
-        used += if row.is_empty() { length } else { 2 + length };
-        row.push((label, Some(*number) == held));
-    }
-    if !row.is_empty() {
-        rows.push(row);
-    }
-
-    let mut choice_lines = Vec::new();
-    for row in &rows {
-        let mut spans = vec![Span::raw("  ")];
-        for (at, (label, held_now)) in row.iter().enumerate() {
-            if at > 0 {
-                spans.push(Span::raw("  "));
-            }
-            spans.push(Span::styled(
-                label.clone(),
-                if *held_now {
-                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default()
-                },
-            ));
-        }
-        choice_lines.push(Line::from(spans));
-    }
-    // A set wider than the box is cut rather than scrolled: the options column
-    // still carries all of it, one row each.
-    let room = usize::from(screen.height.saturating_sub(2)).saturating_sub(5);
-    lines.extend(choice_lines.into_iter().take(room.max(1)));
-    // The keys a box answers to: a table's slots are walked by the sideways
-    // keys, and a value by the upright ones.
-    let footer = match (choices.is_empty(), elements > 1) {
-        (true, _) => "  enter write \u{00b7} esc cancel",
-        (false, true) => {
-            "  \u{2190}\u{2192} slot \u{00b7} \u{2191}\u{2193} value \u{00b7} enter write \u{00b7} esc cancel"
-        }
-        (false, false) => "  \u{2191}\u{2193} value \u{00b7} enter write \u{00b7} esc cancel",
-    };
-    lines.push(Line::from(Span::styled(footer, Style::default().fg(MUTED))));
-
-    let height = (lines.len() as u16 + 2).min(screen.height);
+    let width = screen.width.saturating_sub(2).clamp(24, 46);
+    let height = if choices.is_empty() { 6 } else { 12 }.min(screen.height);
     let dialog = ratatui::layout::Rect {
         x: screen.x + (screen.width.saturating_sub(width)) / 2,
         y: screen.y + (screen.height.saturating_sub(height)) / 2,
@@ -184,9 +119,84 @@ fn draw_edit(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         height,
     };
     frame.render_widget(Clear, dialog);
+    let block = Block::default().borders(Borders::ALL).title(title);
+    let inner = block.inner(dialog);
+    frame.render_widget(block, dialog);
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    let head = vec![
+        Line::from(vec![
+            Span::styled(" > ", Style::default().fg(MUTED)),
+            Span::styled(format!("{text}\u{258F}"), Style::default().fg(ACCENT)),
+        ]),
+        Line::from(Span::styled(
+            format!("  {hint}"),
+            Style::default().fg(MUTED),
+        )),
+    ];
+    frame.render_widget(Paragraph::new(head), rows[0]);
+
+    if !choices.is_empty() {
+        let count = choices.len();
+        let visible = usize::from(rows[1].height).max(1);
+        let held_at = held.and_then(|held| choices.iter().position(|(_, number)| *number == held));
+        // The name held sits in the middle of the window wherever the list
+        // allows, so the way up and the way down are both in sight.
+        let first = match held_at {
+            Some(at) => at
+                .saturating_sub(visible / 2)
+                .min(count.saturating_sub(visible)),
+            None => 0,
+        };
+
+        let items: Vec<ListItem> = choices
+            .iter()
+            .skip(first)
+            .take(visible)
+            .map(|(name, number)| {
+                let held_now = Some(*number) == held;
+                let label = format!(
+                    " {} {name} ({number})",
+                    if held_now { "\u{2192}" } else { " " }
+                );
+                ListItem::new(label).style(if held_now {
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                })
+            })
+            .collect();
+        frame.render_widget(List::new(items), rows[1]);
+
+        if count > visible {
+            let mut bar = ScrollbarState::new(count).position(first);
+            frame.render_stateful_widget(
+                Scrollbar::new(ScrollbarOrientation::VerticalRight),
+                rows[1],
+                &mut bar,
+            );
+        }
+    }
+
+    let footer = match (choices.is_empty(), elements > 1) {
+        (true, _) => "  enter write \u{00b7} esc cancel",
+        (false, true) => "  \u{2190}\u{2192} slot \u{00b7} \u{2191}\u{2193} value \u{00b7} enter \u{00b7} esc",
+        (false, false) => "  \u{2191}\u{2193} value \u{00b7} enter write \u{00b7} esc cancel",
+    };
     frame.render_widget(
-        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title)),
-        dialog,
+        Paragraph::new(Line::from(Span::styled(
+            footer,
+            Style::default().fg(MUTED),
+        ))),
+        rows[2],
     );
 }
 
