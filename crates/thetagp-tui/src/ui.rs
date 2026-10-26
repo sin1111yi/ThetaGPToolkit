@@ -5,7 +5,7 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table, TableState,
+    Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState,
 };
 
 use thetagp_client::KeyType;
@@ -26,6 +26,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         .split(frame.area());
     draw_body(frame, app, columns[0]);
     draw_options(frame, app, columns[1]);
+    draw_edit(frame, app);
 }
 
 fn draw_body(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -56,6 +57,124 @@ fn draw_body(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     }
     draw_profiles(frame, app, areas[at]);
     draw_status(frame, app, areas[at + 1]);
+}
+
+/// The value being typed, in a box of its own over the device: a row of the
+/// table is too narrow to hold a value and the names it may take beside it.
+fn draw_edit(frame: &mut Frame, app: &App) {
+    let Some(editing) = &app.editing else {
+        return;
+    };
+
+    let (key, choices, current) = app.options();
+    let title = match editing.target {
+        Target::Key(_) => format!(" edit · {key} "),
+        Target::Remap(slot) => format!(" edit · input {slot:02} "),
+        Target::ProfileName(row) => format!(
+            " edit · profile {} ",
+            app.profiles.get(row).map(|entry| entry.id).unwrap_or(0)
+        ),
+    };
+    let hint = match editing.target {
+        Target::Key(row) => match app.keys.get(row) {
+            // A value drawn from the schema's enum is read by name, and the
+            // name is what a reader is looking at while typing its number.
+            Some(key) => match &key.value_enum {
+                Some(named) => format!("{named}: a number in {}..{}", key.min, key.max),
+                None => format!("a number in {}..{}", key.min, key.max),
+            },
+            None => String::new(),
+        },
+        Target::Remap(_) => "the button this input feeds".to_string(),
+        Target::ProfileName(_) => "the name its body carries".to_string(),
+    };
+
+    // Whatever is being typed wins over the value on the device: it is the one
+    // the reader is choosing between.
+    let typed: Option<i32> = editing.text.trim().parse().ok();
+    let held = typed.or(current);
+
+    let screen = frame.area();
+    let width = ((u32::from(screen.width) * 2 / 3) as u16)
+        .max(44)
+        .min(screen.width);
+    let inner = usize::from(width.saturating_sub(2));
+
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled(" > ", Style::default().fg(MUTED)),
+            Span::styled(
+                format!("{}\u{258F}", editing.text),
+                Style::default().fg(ACCENT),
+            ),
+        ]),
+        Line::from(Span::styled(format!("  {hint}"), Style::default().fg(MUTED))),
+        Line::from(""),
+    ];
+
+    // The choices are packed into a run of rows rather than one per line: the
+    // whole set at once is what makes a number pickable.
+    let mut rows: Vec<Vec<(String, bool)>> = Vec::new();
+    let mut row: Vec<(String, bool)> = Vec::new();
+    let mut used = 0;
+    for (name, number) in &choices {
+        // The one held is marked in the run itself, so a monochrome terminal
+        // reads it too.
+        let label = format!(
+            "{}{name} ({number})",
+            if Some(*number) == held { "\u{2192}" } else { " " }
+        );
+        let length = label.chars().count();
+        if !row.is_empty() && used + 2 + length > inner.saturating_sub(3) {
+            rows.push(std::mem::take(&mut row));
+            used = 0;
+        }
+        used += if row.is_empty() { length } else { 2 + length };
+        row.push((label, Some(*number) == held));
+    }
+    if !row.is_empty() {
+        rows.push(row);
+    }
+
+    let mut choice_lines = Vec::new();
+    for row in &rows {
+        let mut spans = vec![Span::raw("  ")];
+        for (at, (label, held_now)) in row.iter().enumerate() {
+            if at > 0 {
+                spans.push(Span::raw("  "));
+            }
+            spans.push(Span::styled(
+                label.clone(),
+                if *held_now {
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                },
+            ));
+        }
+        choice_lines.push(Line::from(spans));
+    }
+    // A set wider than the box is cut rather than scrolled: the options column
+    // still carries all of it, one row each.
+    let room = usize::from(screen.height.saturating_sub(2)).saturating_sub(5);
+    lines.extend(choice_lines.into_iter().take(room.max(1)));
+    lines.push(Line::from(Span::styled(
+        "  enter write · esc cancel",
+        Style::default().fg(MUTED),
+    )));
+
+    let height = (lines.len() as u16 + 2).min(screen.height);
+    let dialog = ratatui::layout::Rect {
+        x: screen.x + (screen.width.saturating_sub(width)) / 2,
+        y: screen.y + (screen.height.saturating_sub(height)) / 2,
+        width,
+        height,
+    };
+    frame.render_widget(Clear, dialog);
+    frame.render_widget(
+        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title)),
+        dialog,
+    );
 }
 
 fn draw_header(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {

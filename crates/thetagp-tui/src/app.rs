@@ -885,4 +885,49 @@ mod tests {
         app.restore_snapshot().expect("a restore");
         assert!(app.message.starts_with("restored"), "{}", app.message);
     }
+
+    /// The screen as text, without a terminal to hold it.
+    fn screen(app: &App) -> String {
+        let backend = ratatui::backend::TestBackend::new(100, 40);
+        let mut terminal = ratatui::Terminal::new(backend).expect("a terminal");
+        terminal
+            .draw(|frame| crate::ui::draw(frame, app))
+            .expect("a frame");
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        text
+    }
+
+    #[test]
+    fn the_value_being_typed_is_drawn_over_the_device() {
+        let mut app = App::at(daemon_on_sim());
+        app.refresh().expect("a state");
+        app.pane = Pane::Remap;
+        app.begin_edit().expect("a slot to edit");
+        app.editing.as_mut().expect("an edit").text = "4".into();
+
+        let text = screen(&app);
+        assert!(
+            text.contains("edit · input 00"),
+            "the box names the field it holds"
+        );
+        assert!(
+            text.contains("enter write · esc cancel"),
+            "and the keys that leave it"
+        );
+        assert!(
+            text.contains("UP (0)") && text.contains("E8 (31)"),
+            "every name the value may take is in it"
+        );
+        assert!(
+            text.contains("\u{2192}B1 (4)"),
+            "the value being typed is the one marked"
+        );
+    }
 }
