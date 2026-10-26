@@ -30,15 +30,17 @@ pub fn draw(frame: &mut Frame, app: &App) {
         .split(frame.area());
     let columns = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(68),
-            Constraint::Percentage(11),
-            Constraint::Percentage(21),
-        ])
+        .constraints([Constraint::Percentage(68), Constraint::Percentage(32)])
         .split(rows[0]);
+    // The column beside the device is answered in two: what the line in focus
+    // means holds the top third, and what the screen has said fills the rest.
+    let aside = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Ratio(1, 3), Constraint::Ratio(2, 3)])
+        .split(columns[1]);
     draw_body(frame, app, columns[0]);
-    draw_about(frame, app, columns[1]);
-    draw_log(frame, app, columns[2]);
+    draw_about(frame, app, aside[0]);
+    draw_log(frame, app, aside[1]);
     draw_status(frame, app, rows[1]);
     // A box sits over the device alone: what it is writing is read against the
     // panes, never against the description of it.
