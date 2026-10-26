@@ -16,7 +16,7 @@ use crate::labels;
 
 const ACCENT: Color = Color::Rgb(90, 156, 255);
 const MUTED: Color = Color::Rgb(139, 146, 156);
-// What a reader checks before acting -- the key a value goes into, the profile
+// What a reader checks before acting -- the button a value goes into, the profile
 // a change lands in -- is set apart from the blue of what is being written.
 pub(crate) const HIGHLIGHT: Color = Color::Rgb(232, 176, 96);
 
@@ -82,9 +82,9 @@ fn draw_edit(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             app.profiles.get(row).map(|entry| entry.id).unwrap_or(0)
         ),
     };
-    // The key a value is written into, and what it may be: which of a table's
-    // keys is under the writer is what a reader checks before typing, so it is
-    // the one piece of the line set apart.
+    // The button a value is written into, and what it may be: which of a
+    // table's buttons is under the writer is what a reader checks before
+    // typing, so it is the one piece of the line set apart.
     let (position, space) = match editing.target {
         Target::Key(row) => match app.keys.get(row) {
             // A value drawn from the schema's enum is read by name, and the
@@ -95,7 +95,7 @@ fn draw_edit(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                     None => format!("a number in {}..{}", key.min, key.max),
                 };
                 let position =
-                    (elements > 1).then(|| format!("key {} of {elements}", editing.slot + 1));
+                    (elements > 1).then(|| format!("button {} of {elements}", editing.slot + 1));
                 (position, space)
             }
             None => (None, String::new()),

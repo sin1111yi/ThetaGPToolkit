@@ -1049,7 +1049,7 @@ mod tests {
     }
 
     #[test]
-    fn the_key_a_value_goes_into_is_set_apart_in_its_own_colour() {
+    fn the_button_a_value_goes_into_is_set_apart_in_its_own_colour() {
         let mut app = App::at(daemon_on_sim());
         app.refresh().expect("a state");
         app.selected = row_of(&app, "map.btn_map");
@@ -1057,11 +1057,11 @@ mod tests {
         app.edit_slot(4);
 
         assert!(
-            screen(&app).contains("key 5 of 8"),
-            "the key of the table is named"
+            screen(&app).contains("button 5 of 8"),
+            "the button of the table is named"
         );
         assert_eq!(
-            colour_of(&app, "key 5 of 8"),
+            colour_of(&app, "button 5 of 8"),
             Some(crate::ui::HIGHLIGHT),
             "and read in the colour kept for what is checked before typing"
         );
