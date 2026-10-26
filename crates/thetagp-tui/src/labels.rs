@@ -94,13 +94,16 @@ mod tests {
 
     #[test]
     fn a_slot_is_named_by_the_button_the_schema_lists() {
-        assert_eq!(button(0).as_deref(), Some("B1"));
-        assert_eq!(button(23).as_deref(), Some("E8"));
-        assert_eq!(button(24), None);
-        assert_eq!(slot(0), "B1 (0)");
-        assert_eq!(slot(4), "L1 (4)");
-        assert_eq!(slot(23), "E8 (23)");
-        assert_eq!(slot(24), "24");
+        // The value is the bit the mask names: UP is 0, B1 is 4, E8 is 31.
+        assert_eq!(button(0).as_deref(), Some("UP"));
+        assert_eq!(button(4).as_deref(), Some("B1"));
+        assert_eq!(button(20).as_deref(), Some("DU"));
+        assert_eq!(button(31).as_deref(), Some("E8"));
+        assert_eq!(button(32), None);
+        assert_eq!(slot(0), "UP (0)");
+        assert_eq!(slot(4), "B1 (4)");
+        assert_eq!(slot(31), "E8 (31)");
+        assert_eq!(slot(32), "32");
         assert_eq!(slot(UNMAPPED), "unmapped");
     }
 

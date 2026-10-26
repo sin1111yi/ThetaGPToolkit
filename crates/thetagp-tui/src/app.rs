@@ -821,12 +821,27 @@ mod tests {
 
         let (_, choices, _) = app.options();
         assert_eq!(choices.len(), 33, "0..31 and the one that feeds nothing");
-        assert!(choices.iter().any(|(name, number)| *number == 0 && name == "B1"));
         assert!(
-            choices.iter().any(|(name, number)| *number == 24 && name == "24"),
-            "an index the schema does not name is still offered"
+            choices.iter().any(|(name, number)| *number == 0 && name == "UP"),
+            "the first bit is up"
         );
-        assert!(choices.iter().any(|(name, number)| *number == 255 && name == "Unmapped"));
+        assert!(
+            choices.iter().any(|(name, number)| *number == 4 && name == "B1"),
+            "a face button sits at its own bit"
+        );
+        assert!(
+            choices.iter().any(|(name, number)| *number == 24 && name == "E1"),
+            "an extra button keeps its bit"
+        );
+        assert!(
+            choices.iter().all(|(name, _)| name.parse::<i32>().is_err()),
+            "every index the table can take has a name now"
+        );
+        assert!(
+            choices
+                .iter()
+                .any(|(name, number)| *number == 255 && name.eq_ignore_ascii_case("unmapped"))
+        );
     }
 
     #[test]

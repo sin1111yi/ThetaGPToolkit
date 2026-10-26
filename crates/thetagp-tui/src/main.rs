@@ -75,7 +75,7 @@ fn argument(name: &str) -> Option<String> {
 fn print_frame(app: &App) -> io::Result<()> {
     use std::io::Write;
 
-    let backend = ratatui::backend::TestBackend::new(100, 30);
+    let backend = ratatui::backend::TestBackend::new(100, 40);
     let mut terminal = Terminal::new(backend)?;
     terminal.draw(|frame| ui::draw(frame, app))?;
 
