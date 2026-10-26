@@ -131,7 +131,7 @@ fn handle(app: &mut App, code: KeyCode) -> bool {
         KeyCode::Up => step(app, -1),
         KeyCode::Down => step(app, 1),
         KeyCode::Enter => match app.pane {
-            Pane::Keys | Pane::Remap => app.begin_edit(),
+            Pane::Keys | Pane::Remap => act(app, |app| app.begin_edit()),
             Pane::Profiles => act(app, |app| app.select_profile()),
             Pane::Sources => act(app, |app| app.connect()),
         },
@@ -140,6 +140,7 @@ fn handle(app: &mut App, code: KeyCode) -> bool {
         KeyCode::Char('w') => act(app, |app| app.save()),
         KeyCode::Char('l') => act(app, |app| app.load()),
         KeyCode::Char('n') => act(app, |app| app.create_profile()),
+        KeyCode::Char('e') if app.pane == Pane::Profiles => act(app, |app| app.begin_edit()),
         // The delete keeps its own pending state: the same key confirms it.
         KeyCode::Char('x') => act_keeping_pending(app, |app| app.delete_profile()),
         KeyCode::Char('t') => act(app, |app| app.take_snapshot()),

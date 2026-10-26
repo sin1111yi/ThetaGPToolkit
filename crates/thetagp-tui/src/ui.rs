@@ -258,8 +258,20 @@ fn draw_profiles(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let items: Vec<ListItem> = app
         .profiles
         .iter()
-        .map(|entry| {
+        .enumerate()
+        .map(|(index, entry)| {
             let mut spans = vec![Span::styled(format!("#{}", entry.id), Style::default())];
+            // The name the profile carries, while it is being typed over.
+            let named = match &app.editing {
+                Some(editing) if editing.target == Target::ProfileName(index) => {
+                    format!("\"{}\"", editing.text)
+                }
+                _ if !entry.name.is_empty() => format!("\"{}\"", entry.name),
+                _ => String::new(),
+            };
+            if !named.is_empty() {
+                spans.push(Span::styled(format!(" {named}"), Style::default().fg(ACCENT)));
+            }
             if entry.active {
                 spans.push(Span::styled(" · active", Style::default().fg(ACCENT)));
             }
@@ -299,7 +311,7 @@ fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // terminal: they are written on two.
     let help = vec![
         Line::from(Span::styled(
-            "  tab pane · enter connect / edit a value / activate a profile · n new profile · x delete (twice)",
+            "  tab pane · enter connect / edit a value / activate a profile · n new profile · e name it · x delete (twice)",
             Style::default(),
         )),
         Line::from(Span::styled(

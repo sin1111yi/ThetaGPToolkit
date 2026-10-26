@@ -294,6 +294,8 @@ pub fn device() -> SimulatedDevice {
                         .map(|id| proto::ProfileEntry {
                             id: *id,
                             active: *id == store.active,
+                            // The name travels in the body, as on a board.
+                            name: name_of(&store, *id),
                         })
                         .collect(),
                 }))
@@ -386,6 +388,21 @@ pub fn device() -> SimulatedDevice {
             _ => common(request.clone()),
         }
     })
+}
+
+/// The name a profile body carries, as the board reads it.
+fn name_of(store: &ProfileStore, id: u32) -> String {
+    let Some(body) = store.bodies.get(&id) else {
+        return String::new();
+    };
+    let Ok(document) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return String::new();
+    };
+    document
+        .get("name")
+        .and_then(|name| name.as_str())
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// The store the simulated device keeps: one body per profile, and the one body

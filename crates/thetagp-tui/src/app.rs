@@ -27,6 +27,9 @@ pub struct Identity {
 pub struct ProfileEntry {
     pub id: u32,
     pub active: bool,
+    /// The name the profile's body carries; empty when it carries none.
+    #[serde(default)]
+    pub name: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -59,6 +62,8 @@ pub enum Target {
     Key(usize),
     /// One slot of the remap table, by its position.
     Remap(usize),
+    /// The name of the profile at that position in the list.
+    ProfileName(usize),
 }
 
 /// A value being typed.
@@ -296,12 +301,28 @@ impl App {
         }
     }
 
-    pub fn begin_edit(&mut self) {
+    pub fn begin_edit(&mut self) -> Result<(), String> {
         match self.pane {
+            Pane::Profiles => {
+                // The factory profile is the board's own; its name is not a
+                // host's to write, as its body is not.
+                let Some(entry) = self.profiles.get(self.profile_selected) else {
+                    return Ok(());
+                };
+                if entry.id == 0 {
+                    return Err(
+                        "the factory profile is the board's own and is not renamed".into()
+                    );
+                }
+                self.editing = Some(Editing {
+                    target: Target::ProfileName(self.profile_selected),
+                    text: entry.name.clone(),
+                });
+            }
             Pane::Remap => {
                 let slot = self.remap_selected;
                 if slot >= self.remap_len() {
-                    return;
+                    return Ok(());
                 }
                 self.editing = Some(Editing {
                     target: Target::Remap(slot),
@@ -311,7 +332,7 @@ impl App {
             _ => {
                 let row = self.selected;
                 if row >= self.keys.len() {
-                    return;
+                    return Ok(());
                 }
                 self.editing = Some(Editing {
                     target: Target::Key(row),
@@ -319,6 +340,7 @@ impl App {
                 });
             }
         }
+        Ok(())
     }
 
     pub fn edit_push(&mut self, character: char) {
@@ -342,6 +364,19 @@ impl App {
         let Some(editing) = self.editing.take() else {
             return Ok(());
         };
+
+        // A profile's name is its body's: renaming writes the body back.
+        if let Target::ProfileName(row) = editing.target {
+            let Some(entry) = self.profiles.get(row).cloned() else {
+                return Ok(());
+            };
+            self.call(
+                "session.profile_rename",
+                json!({ "id": entry.id, "name": editing.text.trim() }),
+            )?;
+            self.message = format!("profile #{} is named {:?}", entry.id, editing.text.trim());
+            return self.refresh();
+        }
 
         // A slot of the remap table is written as the whole table, with the one
         // slot replaced: the device holds a run, not an element.
@@ -631,12 +666,12 @@ mod tests {
             .position(|key| key.name == "led.bri")
             .expect("the key the device declares");
         app.selected = row;
-        app.begin_edit();
+        app.begin_edit().expect("an edit opens");
         app.editing.as_mut().expect("an edit").text = "200".into();
         app.commit_edit().expect("a value the key holds");
         assert_eq!(app.values.get("led.bri"), Some(&Value::Scalar(200)));
 
-        app.begin_edit();
+        app.begin_edit().expect("an edit opens");
         app.editing.as_mut().expect("an edit").text = "9999".into();
         assert!(app.commit_edit().is_err(), "a value out of range is refused");
     }
@@ -650,13 +685,13 @@ mod tests {
 
         app.pane = Pane::Remap;
         app.remap_selected = 2;
-        app.begin_edit();
+        app.begin_edit().expect("an edit opens");
         app.editing.as_mut().expect("an edit").text = "9".into();
         app.commit_edit().expect("a slot the key holds");
 
         let table = app.remap_values();
         assert_eq!(table.get(2), Some(&9));
-        app.begin_edit();
+        app.begin_edit().expect("an edit opens");
         app.editing.as_mut().expect("an edit").text = "999".into();
         assert!(app.commit_edit().is_err(), "a slot out of range is refused");
     }
@@ -671,7 +706,7 @@ mod tests {
             .position(|key| key.name == "led.bri")
             .expect("the key the device declares");
         app.selected = row;
-        app.begin_edit();
+        app.begin_edit().expect("an edit opens");
         app.editing.as_mut().expect("an edit").text = "77".into();
         app.commit_edit().expect("a value the key holds");
         app.save().expect("a save");
@@ -716,6 +751,21 @@ mod tests {
         app.delete_profile().expect("the delete is confirmed");
         assert_eq!(app.profiles.len(), 1, "the profile is gone, the factory one stays");
         assert_eq!(app.profiles[0].id, 0);
+    }
+
+    #[test]
+    fn a_profile_is_named_and_the_name_is_listed() {
+        let mut app = App::at(daemon_on_sim());
+        app.refresh().expect("a state");
+        app.create_profile().expect("a profile is written");
+        let row = app.profile_selected;
+
+        app.pane = Pane::Profiles;
+        app.begin_edit().expect("an edit opens");
+        app.editing.as_mut().expect("an edit").text = "Main".into();
+        app.commit_edit().expect("the name is written");
+
+        assert_eq!(app.profiles[row].name, "Main");
     }
 
     #[test]

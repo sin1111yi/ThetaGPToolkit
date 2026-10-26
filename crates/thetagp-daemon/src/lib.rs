@@ -164,7 +164,13 @@ impl Service {
                 let profiles: Vec<Json> = listed
                     .profiles
                     .iter()
-                    .map(|entry| json!({ "id": entry.id, "active": entry.active }))
+                    .map(|entry| {
+                        json!({
+                            "id": entry.id,
+                            "active": entry.active,
+                            "name": entry.name,
+                        })
+                    })
                     .collect();
                 Ok(json!({ "active": listed.active, "profiles": profiles }))
             }),
@@ -173,6 +179,10 @@ impl Service {
                 None => Err(("no profile was named".to_string(), -32602)),
             },
             "session.profile_create" => self.create_profile(copied_from),
+            "session.profile_rename" => match (profile, request.pointer("/params/name").and_then(Json::as_str)) {
+                (Some(id), Some(name)) => self.rename_profile(id, name),
+                _ => Err(("a profile and a name are needed".to_string(), -32602)),
+            },
             "session.profile_delete" => match profile {
                 Some(id) => self.delete_profile(id),
                 None => Err(("no profile was named".to_string(), -32602)),
@@ -288,6 +298,24 @@ impl Service {
         })
     }
 
+    /// Names a profile: its body is read, the name set in it, and the body
+    /// written back, because the name travels in the body.
+    fn rename_profile(&self, id: u64, name: &str) -> Result<Json, (String, i64)> {
+        self.with(|session| {
+            let body = session
+                .profile_get(id as u32)
+                .map_err(|error| error.to_string())?;
+            let text = String::from_utf8(body).map_err(|error| error.to_string())?;
+            let mut document = read_body(&text)?;
+            document["name"] = Json::String(name.to_string());
+            let written = serde_json::to_vec(&document).map_err(|error| error.to_string())?;
+            session
+                .profile_put(id as u32, &written)
+                .map_err(|error| error.to_string())?;
+            Ok(json!({ "id": id, "name": name }))
+        })
+    }
+
     /// Deletes a profile the store carries; the factory profile is the device's
     /// own and its refusal comes back as the device states it.
     fn delete_profile(&self, id: u64) -> Result<Json, (String, i64)> {
@@ -329,6 +357,28 @@ impl Service {
             .ok_or(("nothing is connected".to_string(), -32002))?;
         body(&mut open.session).map_err(|error| (error, -32000))
     }
+}
+
+/// The body a profile carries, read as JSON.
+///
+/// A body written by an earlier firmware can be short of its closing brace: it
+/// is a valid body with its last byte missing, and the only thing between it
+/// and reading is the brace. That is added, within the depth a body opens, and
+/// the body goes back to the device repaired when it is written again.
+fn read_body(text: &str) -> Result<Json, String> {
+    let first_error = match serde_json::from_str::<Json>(text) {
+        Ok(document) => return Ok(document),
+        Err(error) => error,
+    };
+
+    let mut repaired = text.trim_end().to_string();
+    for _ in 0..4 {
+        repaired.push('}');
+        if let Ok(document) = serde_json::from_str::<Json>(&repaired) {
+            return Ok(document);
+        }
+    }
+    Err(format!("the profile body did not read: {first_error}"))
 }
 
 /// The ports are asked rather than guessed at: a port that answers is a device,
