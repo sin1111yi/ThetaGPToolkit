@@ -30,14 +30,23 @@ again under them.
 - The messages of the protocol, generated from the schema it carries, and its
   descriptor set, read for what has no Rust type.
 - The device's own commands: the configuration and its keys, the profiles and
-  their bodies, the diagnostics and the flash, and a snapshot of the whole of it.
+  their bodies, the diagnostics, the firmware's log and the flash, and a
+  snapshot of the whole of it.
 - A daemon that holds the device, so a window and a model share one board, and a
   socket and a token that only its owner can read in front of it.
 - An MCP server over stdio, so a model can work the device and the protocol.
-- A terminal window over the daemon: the sources, the board's identity, every
-  key the device declares -- written where it is edited -- the button remap
-  table one slot at a time, the profiles, and a snapshot taken and put back.
-  `--frame` renders one screen as text, for a log or a machine with no display.
+- A terminal window over the daemon: the sources, the board's identity, the
+  configuration as a menu grouped by the path each key's name carries, the
+  button remap table one input at a time, the profiles, and a snapshot taken and
+  put back. A value is edited in a box over the device, with the names it may
+  take scrolling under it; a hue and a saturation are edited on the band they
+  belong to, drawn from the rest of the colour the profile carries. `--frame`
+  renders one screen as text, for a log or a machine with no display.
+- Beside the device: a column saying what the line in focus is for, and under it
+  the **firmware's own log**, read over the protocol -- the lines the device
+  kept in its ring, with the level each was written at.
+- A question before a profile goes and before the screen does, so a change that
+  is only on the device is not lost with the window.
 - A simulated device, so every one of those paths runs with no board on the desk.
 
 ## Quick Start
@@ -56,9 +65,12 @@ cargo run -p thetagp-tui -- --frame               # one screen, as text
 cargo run -p thetagp-tui -- --frame --source /dev/ttyACM0
 ```
 
-Keys: `tab` between the panes, `enter` to connect, edit a value or a remap slot
-or activate a profile, `w` save, `l` load, `t` snapshot, `r` restore, `d`
-disconnect, `q` quit.
+Keys: `tab` between the panes; `up`/`down` move, `left`/`right` go out of and
+into a level of the options menu, `enter` opens a segment, edits a value or a
+remap slot, or activates a profile; `w` save, `l` load, `t` snapshot, `r`
+restore, `d` disconnect, `q` quit -- which asks first when a change has not been
+saved. In a box, `up`/`down` walk the values a key takes, `left`/`right` walk a
+band, and the first digit typed replaces what was there.
 
 A client that finds no daemon starts one beside itself, so the daemon is not
 something to run by hand unless its log is wanted.
@@ -83,8 +95,9 @@ crates/
                     and the window's typed calls over that link
   thetagp-mcp/      the same tools, as the JSON-RPC a model host speaks over
                     stdio: it passes each call to the daemon
-  thetagp-tui/      the window, in a terminal: the daemon's device as keys,
-                    profiles and a snapshot, with `--frame` for no display
+  thetagp-tui/      the window, in a terminal: the daemon's device as an
+                    options menu, the remap table, the profiles and the
+                    firmware's log, with `--frame` for no display
 ```
 
 A device is one port, so one process opens it: the daemon. Everything else --
