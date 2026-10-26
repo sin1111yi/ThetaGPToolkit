@@ -62,3 +62,53 @@ pub fn enum_value_name(enum_name: &str, value: i32) -> Option<String> {
         _ => name.to_string(),
     })
 }
+
+/// Every value an enum declares, as the name a reader sees and the number it
+/// stands for, in number order. The prefix every enumerator shares is left off,
+/// as it is for one value.
+pub fn enum_values(enum_name: &str) -> Vec<(String, i32)> {
+    use std::sync::OnceLock;
+
+    static POOL: OnceLock<Option<prost_reflect::DescriptorPool>> = OnceLock::new();
+    let Some(pool) = POOL
+        .get_or_init(|| prost_reflect::DescriptorPool::decode(DESCRIPTOR_SET).ok())
+        .as_ref()
+    else {
+        return Vec::new();
+    };
+    let Some(descriptor) = pool
+        .get_enum_by_name(enum_name)
+        .or_else(|| pool.get_enum_by_name(&format!("ThetaGP.{enum_name}")))
+    else {
+        return Vec::new();
+    };
+
+    let spellings: Vec<(String, i32)> = descriptor
+        .values()
+        .map(|entry| (entry.name().to_string(), entry.number()))
+        .collect();
+    let Some((first, _)) = spellings.first() else {
+        return Vec::new();
+    };
+    let mut shared = first.len();
+    for (other, _) in &spellings {
+        shared = shared.min(
+            first
+                .chars()
+                .zip(other.chars())
+                .take_while(|(a, b)| a == b)
+                .count(),
+        );
+    }
+    let cut = first[..shared].rfind('_').map(|at| at + 1).unwrap_or(0);
+
+    let mut values: Vec<(String, i32)> = spellings
+        .into_iter()
+        .map(|(name, number)| {
+            let short = name.get(cut..).unwrap_or(&name).to_string();
+            (short, number)
+        })
+        .collect();
+    values.sort_by_key(|(_, number)| *number);
+    values
+}

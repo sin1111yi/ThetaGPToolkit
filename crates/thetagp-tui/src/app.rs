@@ -225,6 +225,9 @@ impl App {
             .to_string();
         self.connected = Some(name.clone());
         self.message = format!("{name} answers");
+        // A device that answered has values to read: the keys are where a
+        // reader lands, rather than the list of sources they just left.
+        self.pane = Pane::Keys;
         self.refresh()
     }
 
@@ -286,6 +289,40 @@ impl App {
                 .join(", "),
             Some(Value::Scalar(value)) => value.to_string(),
             None => String::new(),
+        }
+    }
+
+    /// The choices the item in focus offers, by the name each is read by, and
+    /// the one it holds now.
+    pub fn options(&self) -> (String, Vec<(String, i32)>, Option<i32>) {
+        match self.pane {
+            Pane::Keys => {
+                let Some(key) = self.keys.get(self.selected) else {
+                    return (String::new(), Vec::new(), None);
+                };
+                let current = match self.values.get(&key.name) {
+                    Some(Value::Scalar(number)) => Some(*number as i32),
+                    Some(Value::Array(run)) => run.first().copied(),
+                    None => None,
+                };
+                let choices = key
+                    .value_enum
+                    .as_deref()
+                    .map(thetagp_proto::enum_values)
+                    .unwrap_or_default();
+                (key.name.clone(), choices, current)
+            }
+            Pane::Remap => {
+                let current = self.remap_text(self.remap_selected).parse::<i32>().ok();
+                let choices = self
+                    .remap_key()
+                    .and_then(|key| key.value_enum.as_deref())
+                    .map(thetagp_proto::enum_values)
+                    .unwrap_or_default();
+                ("map.btn_map".to_string(), choices, current)
+            }
+            Pane::Profiles => ("profiles".to_string(), Vec::new(), None),
+            Pane::Sources => ("sources".to_string(), Vec::new(), None),
         }
     }
 
@@ -735,6 +772,26 @@ mod tests {
         assert!(drawn.contains("BoringTechH743"), "the board is named");
         assert!(drawn.contains("LED Brightness"), "the key is named readably");
         assert!(drawn.contains("led.bri"), "the key's own name is shown beside it");
+    }
+
+    #[test]
+    fn the_options_are_the_values_the_key_declares() {
+        let mut app = App::at(daemon_on_sim());
+        app.refresh().expect("a state");
+        app.pane = Pane::Keys;
+        app.selected = app
+            .keys
+            .iter()
+            .position(|key| key.name == "usb.input_mode")
+            .expect("the key the device declares");
+
+        let (key, choices, current) = app.options();
+        assert_eq!(key, "usb.input_mode");
+        assert_eq!(current, Some(14));
+        assert!(
+            choices.iter().any(|(name, number)| name == "GENERIC" && *number == 14),
+            "the mode the device is in is among them: {choices:?}"
+        );
     }
 
     #[test]

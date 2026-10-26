@@ -17,6 +17,18 @@ const ACCENT: Color = Color::Rgb(90, 156, 255);
 const MUTED: Color = Color::Rgb(139, 146, 156);
 
 pub fn draw(frame: &mut Frame, app: &App) {
+    // The body on the left, and the choices the item in focus offers on the
+    // right: a value's names are the schema's, and reading them beside the
+    // field is what saves a lookup.
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(68), Constraint::Percentage(32)])
+        .split(frame.area());
+    draw_body(frame, app, columns[0]);
+    draw_options(frame, app, columns[1]);
+}
+
+fn draw_body(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let mut constraints = vec![
         Constraint::Length(3), // header
         Constraint::Length(4), // sources
@@ -32,7 +44,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let areas = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
-        .split(frame.area());
+        .split(area);
 
     draw_header(frame, app, areas[0]);
     draw_sources(frame, app, areas[1]);
@@ -64,6 +76,48 @@ fn draw_header(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Paragraph::new(line).block(Block::default().borders(Borders::ALL)),
         area,
     );
+}
+
+/// The values the item in focus can take, the one it holds marked.
+fn draw_options(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let (key, choices, current) = app.options();
+    let title = if key.is_empty() {
+        " options ".to_string()
+    } else {
+        format!(" options · {key} ")
+    };
+    let block = Block::default().borders(Borders::ALL).title(title);
+
+    if choices.is_empty() {
+        let hint = match app.keys.get(app.selected) {
+            Some(key) if app.pane == Pane::Keys || app.pane == Pane::Remap => format!(
+                " a number in {}..{}",
+                key.min, key.max
+            ),
+            _ => " nothing to choose here".to_string(),
+        };
+        frame.render_widget(
+            Paragraph::new(hint)
+                .style(Style::default().fg(MUTED))
+                .block(block),
+            area,
+        );
+        return;
+    }
+
+    let items: Vec<ListItem> = choices
+        .iter()
+        .map(|(name, number)| {
+            let held = Some(*number) == current;
+            let label = format!("{}{} ({})", if held { "→ " } else { "  " }, name, number);
+            ListItem::new(label).style(if held {
+                Style::default().fg(ACCENT)
+            } else {
+                Style::default()
+            })
+        })
+        .collect();
+    frame.render_widget(List::new(items).block(block), area);
 }
 
 fn draw_sources(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
