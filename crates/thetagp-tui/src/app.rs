@@ -965,9 +965,9 @@ mod tests {
         app.refresh().expect("a state");
         select(&mut app, "led.bri");
         app.begin_edit().expect("an edit opens");
-        app.editing.as_mut().expect("an edit").text = "200".into();
+        app.editing.as_mut().expect("an edit").text = "100".into();
         app.commit_edit().expect("a value the key holds");
-        assert_eq!(app.values.get("led.bri"), Some(&Value::Scalar(200)));
+        assert_eq!(app.values.get("led.bri"), Some(&Value::Scalar(100)));
 
         app.begin_edit().expect("an edit opens");
         app.editing.as_mut().expect("an edit").text = "9999".into();

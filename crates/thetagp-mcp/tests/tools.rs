@@ -99,12 +99,12 @@ fn a_key_is_read_and_written() {
     let written = text_of(
         &mut session,
         "set_key",
-        json!({ "key": "led.bri", "value": 200 }),
+        json!({ "key": "led.bri", "value": 100 }),
     );
     assert!(written.contains("\"in_effect\": true"), "{written}");
     assert_eq!(
         text_of(&mut session, "get_key", json!({ "key": "led.bri" })),
-        "200"
+        "100"
     );
 }
 

@@ -526,7 +526,7 @@ fn declared_keys() -> Vec<proto::ConfigKeyEntry> {
         entry(
             "led.bri",
             0,
-            255,
+            128,
             proto::ConfigKeyType::ConfigKeyU8,
             0,
             false,

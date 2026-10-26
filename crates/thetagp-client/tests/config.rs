@@ -56,7 +56,7 @@ fn a_value_out_of_range_is_refused_before_it_travels() {
 
     match config.set("led.bri", Value::Scalar(999)) {
         Err(Reject::OutOfRange { min, max, got, .. }) => {
-            assert_eq!((min, max, got), (0, 255, 999));
+            assert_eq!((min, max, got), (0, 128, 999));
         }
         other => panic!("{other:?}"),
     }
@@ -111,7 +111,7 @@ fn only_what_changed_is_written() {
     let was = Config::read(&mut session).unwrap();
 
     let mut wanted = was.clone();
-    wanted.set("led.bri", Value::Scalar(200)).unwrap();
+    wanted.set("led.bri", Value::Scalar(100)).unwrap();
     wanted.set("map.socd", Value::Scalar(2)).unwrap();
 
     let written = wanted.apply(&mut session, &was).unwrap();
@@ -119,7 +119,7 @@ fn only_what_changed_is_written() {
     assert_eq!(wanted.diff(&was), written);
 
     let read = Config::read(&mut session).unwrap();
-    assert_eq!(read.get("led.bri"), Some(&Value::Scalar(200)));
+    assert_eq!(read.get("led.bri"), Some(&Value::Scalar(100)));
     assert_eq!(read.get("map.socd"), Some(&Value::Scalar(2)));
 }
 
