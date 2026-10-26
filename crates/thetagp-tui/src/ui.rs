@@ -112,6 +112,21 @@ fn draw_edit(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let typed: Option<i32> = text.trim().parse().ok();
     let held = typed.or(current);
 
+    // A colour is a place on a scale rather than a number to be looked up: the
+    // box shows the scale itself, drawn from the rest of the colour the profile
+    // carries, and the mark where the value stands on it.
+    if let (Target::Key(row), Some(value)) = (editing.target, held) {
+        let band = app.keys.get(row).and_then(|key| match key.name.as_str() {
+            "led.hue" => Some(Band::Hue),
+            "led.sat" => Some(Band::Saturation),
+            _ => None,
+        });
+        if let Some(band) = band {
+            draw_scale_box(frame, app, area, band, title, text, value);
+            return;
+        }
+    }
+
     // The box keeps to the device's column and holds a handful of names at a
     // time: the list scrolls under the value, so a reader picks from the names
     // around the one held rather than reading a wall of them.
@@ -199,6 +214,124 @@ fn draw_edit(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ))),
         rows[2],
     );
+}
+
+/// The colour at a hue, on the wheel the strip draws: six sectors of sixty
+/// degrees, red at zero, taken down to the saturation the profile carries.
+fn hue_colour(degrees: u16, saturation: u8) -> (u8, u8, u8) {
+    let turn = u32::from(degrees % 360);
+    let ramp = ((turn % 60) * 255 / 60) as u8;
+    let (r, g, b) = match turn / 60 {
+        0 => (255, ramp, 0),
+        1 => (255 - ramp, 255, 0),
+        2 => (0, 255, ramp),
+        3 => (0, 255 - ramp, 255),
+        4 => (ramp, 0, 255),
+        _ => (255, 0, 255 - ramp),
+    };
+
+    // A saturation below full colour takes every channel towards white.
+    let mixed = |channel: u8| {
+        ((u32::from(channel) * u32::from(saturation) + 255 * (255 - u32::from(saturation)))
+            / 255) as u8
+    };
+    (mixed(r), mixed(g), mixed(b))
+}
+
+/// Which colour key a band is drawn for: the wheel itself, or one hue taken
+/// from white to full colour.
+#[derive(Clone, Copy)]
+enum Band {
+    Hue,
+    Saturation,
+}
+
+impl Band {
+    /// The numbers the band spans, both ends included.
+    fn range(self) -> (i32, i32) {
+        match self {
+            Band::Hue => (0, 360),
+            Band::Saturation => (0, 255),
+        }
+    }
+
+    /// What the band is read against: the three colours most readers name, or
+    /// the two ends a saturation runs between.
+    fn hint(self) -> &'static str {
+        match self {
+            Band::Hue => "red 0° · green 120° · blue 240°",
+            Band::Saturation => "white 0 · the hue at 255",
+        }
+    }
+
+    /// The colour a point of the band stands for, at the rest of the colour the
+    /// profile carries.
+    fn colour(self, at: i32, hue: u16, saturation: u8) -> (u8, u8, u8) {
+        match self {
+            Band::Hue => hue_colour(at as u16, saturation),
+            Band::Saturation => hue_colour(hue, at as u8),
+        }
+    }
+}
+
+/// The box a colour is picked in: the scale as a band, the mark where the value
+/// stands on it, and the keys that move the mark along.
+fn draw_scale_box(
+    frame: &mut Frame,
+    app: &App,
+    screen: ratatui::layout::Rect,
+    band: Band,
+    title: String,
+    text: &str,
+    value: i32,
+) {
+    let hint = band.hint();
+    let hue = app.hue_degrees();
+    let saturation = app.saturation();
+    let dialog = dialog_in(screen, 46, 8);
+    frame.render_widget(Clear, dialog);
+    let block = Block::default().borders(Borders::ALL).title(title);
+    let inner = block.inner(dialog);
+    frame.render_widget(block, dialog);
+
+    let cells = usize::from(inner.width.saturating_sub(2)).max(2);
+    let last = cells - 1;
+    let (min, max) = band.range();
+    let value = value.clamp(min, max);
+
+    // One cell per point of the scale, so the band reads as the colour it names.
+    let mut cells_line = vec![Span::raw(" ")];
+    cells_line.extend((0..cells).map(|at| {
+        let at = min + (at as i32 * (max - min) / last as i32);
+        let (r, g, b) = band.colour(at, hue, saturation);
+        Span::styled(" ", Style::default().bg(Color::Rgb(r, g, b)))
+    }));
+
+    // The mark sits on the cell the value names, at the band's own width.
+    let at = ((value - min) * last as i32 / (max - min)) as usize;
+    let mut mark = vec![Span::raw(" ")];
+    mark.extend((0..cells).map(|cell| {
+        Span::styled(
+            if cell == at { "▲" } else { " " },
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        )
+    }));
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled(" > ", Style::default().fg(MUTED)),
+            Span::styled(format!("{text}▏"), Style::default().fg(ACCENT)),
+        ]),
+        Line::from(Span::styled(format!("  {hint}"), Style::default().fg(MUTED))),
+        Line::from(""),
+        Line::from(cells_line),
+        Line::from(mark),
+        Line::from(Span::styled(
+            "  ←→ value · enter write · esc cancel",
+            Style::default().fg(MUTED),
+        )),
+    ];
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 /// The pane's title: the menu's top, or the path the reader has gone down.

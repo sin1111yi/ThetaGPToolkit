@@ -66,6 +66,10 @@ pub enum Target {
     ProfileName(usize),
 }
 
+/// How far a sideways key moves a hue, in degrees: about the width of a cell of
+/// the band a hue is picked from, so the mark moves with every press.
+pub const HUE_STEP: i32 = 10;
+
 /// One line of the options menu at the level it is on: a segment of a key's
 /// name that holds more below it, or a key whose name ends here.
 ///
@@ -577,6 +581,34 @@ impl App {
         editing.fresh = true;
     }
 
+    /// `←`/`→`: along the range of a value nothing names, which is what a value
+    /// read off a scale is chosen with. A value with names is stepped by the
+    /// upright keys, and is left alone here.
+    pub fn edit_nudge(&mut self, by: i32) {
+        if !self.options().1.is_empty() {
+            return;
+        }
+        self.edit_step(by);
+    }
+
+    /// The hue the profile carries, which the band a saturation is read off is
+    /// drawn at.
+    pub fn hue_degrees(&self) -> u16 {
+        match self.values.get("led.hue") {
+            Some(Value::Scalar(number)) => (*number).clamp(0, 360) as u16,
+            _ => 0,
+        }
+    }
+
+    /// The saturation the profile carries for the strip, or full colour when it
+    /// carries none: it is what the band a hue is read off is drawn at.
+    pub fn saturation(&self) -> u8 {
+        match self.values.get("led.sat") {
+            Some(Value::Scalar(number)) => (*number).clamp(0, 255) as u8,
+            _ => 255,
+        }
+    }
+
     /// The range the number under the keys is held to, when its key declares
     /// one: the schema's names are preferred over it.
     fn edited_bounds(&self) -> Option<(i32, i32)> {
@@ -995,7 +1027,7 @@ mod tests {
             .collect();
         assert!(drawn.contains("BoringTechH743"), "the board is named");
         assert!(drawn.contains("▸ led"), "the menu opens on the keys' segments");
-        assert!(drawn.contains("4 keys"), "and says how many each holds");
+        assert!(drawn.contains("5 keys"), "and says how many each holds");
     }
 
     #[test]
@@ -1160,6 +1192,83 @@ mod tests {
             .expect("the key is on the level the menu was walked to");
     }
 
+    /// Where the mark of a band is drawn, and the colours the band is filled
+    /// with: what a screen with a colour band holds rather than what it says.
+    fn mark_column(app: &App) -> u16 {
+        let buffer = buffer_of(app);
+        for y in 0..buffer.area.height {
+            if let Some(at) = row_text(&buffer, y).find('▲') {
+                return at as u16;
+            }
+        }
+        panic!("no mark is on the screen");
+    }
+
+    fn band_cells(app: &App) -> Vec<ratatui::style::Color> {
+        let buffer = buffer_of(app);
+        let mut mark_row = None;
+        for y in 0..buffer.area.height {
+            if row_text(&buffer, y).contains('▲') {
+                mark_row = Some(y);
+            }
+        }
+        let band_row = mark_row.expect("a mark is on the screen") - 1;
+        (0..buffer.area.width)
+            .map(|x| buffer[(x, band_row)].bg)
+            .filter(|colour| *colour != ratatui::style::Color::Reset)
+            .collect()
+    }
+
+    #[test]
+    fn a_hue_is_picked_off_the_wheel_the_strip_draws() {
+        let mut app = App::at(daemon_on_sim());
+        app.refresh().expect("a state");
+        select(&mut app, "led.hue");
+        app.begin_edit().expect("the hue opens");
+        app.editing.as_mut().expect("an edit").text = "0".into();
+
+        let cells = band_cells(&app);
+        assert_eq!(
+            cells.first(),
+            Some(&ratatui::style::Color::Rgb(255, 0, 0)),
+            "the wheel starts at red"
+        );
+
+        let at_left = mark_column(&app);
+        app.edit_nudge(HUE_STEP);
+        assert_eq!(
+            app.editing.as_ref().expect("an edit").text,
+            "10",
+            "a sideways key steps the value"
+        );
+        assert!(
+            mark_column(&app) > at_left,
+            "and the mark moves along with it"
+        );
+    }
+
+    #[test]
+    fn a_saturation_band_runs_from_white_to_the_hue_it_carries() {
+        let mut app = App::at(daemon_on_sim());
+        app.refresh().expect("a state");
+        assert_eq!(app.hue_degrees(), 180, "the simulated profile is cyan");
+        select(&mut app, "led.sat");
+        app.begin_edit().expect("the saturation opens");
+        app.editing.as_mut().expect("an edit").text = "255".into();
+
+        let cells = band_cells(&app);
+        assert_eq!(
+            cells.first(),
+            Some(&ratatui::style::Color::Rgb(255, 255, 255)),
+            "no saturation is white"
+        );
+        assert_eq!(
+            cells.last(),
+            Some(&ratatui::style::Color::Rgb(0, 255, 255)),
+            "and full saturation is the hue the profile carries"
+        );
+    }
+
     #[test]
     fn the_options_open_on_the_paths_their_names_carry() {
         let mut app = App::at(daemon_on_sim());
@@ -1175,7 +1284,7 @@ mod tests {
                 },
                 Row::Group {
                     segment: "led".into(),
-                    keys: 4
+                    keys: 5
                 },
                 Row::Group {
                     segment: "usb".into(),
@@ -1201,7 +1310,7 @@ mod tests {
             rows.iter()
                 .filter(|row| matches!(row, Row::Key(_)))
                 .count(),
-            3,
+            4,
             "the keys whose names end here are the level"
         );
         assert_eq!(
@@ -1265,7 +1374,7 @@ mod tests {
         app.refresh().expect("a state");
 
         let top = screen(&app);
-        assert!(top.contains("options (6)"), "the top is the whole menu");
+        assert!(top.contains("options (7)"), "the top is the whole menu");
         assert!(top.contains("▸ led"), "a segment is marked as one");
         assert!(
             !top.contains("LED Mode"),

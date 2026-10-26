@@ -551,6 +551,15 @@ fn declared_keys() -> Vec<proto::ConfigKeyEntry> {
             "",
         ),
         entry(
+            "led.sat",
+            0,
+            255,
+            proto::ConfigKeyType::ConfigKeyU8,
+            0,
+            false,
+            "",
+        ),
+        entry(
             "led.rgb.hz",
             1,
             100,
@@ -603,6 +612,7 @@ fn declared_values() -> BTreeMap<String, Value> {
         ("led.bri".to_string(), Value::Scalar(128)),
         ("led.mode".to_string(), Value::Scalar(1)),
         ("led.hue".to_string(), Value::Scalar(180)),
+        ("led.sat".to_string(), Value::Scalar(255)),
         ("led.rgb.hz".to_string(), Value::Scalar(10)),
         ("usb.input_mode".to_string(), Value::Scalar(14)),
     ])

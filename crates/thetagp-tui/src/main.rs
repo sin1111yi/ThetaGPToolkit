@@ -18,7 +18,7 @@ use ratatui::crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 
-use app::{App, Pane};
+use app::{App, HUE_STEP, Pane};
 
 fn main() -> io::Result<()> {
     let mut app = App::new();
@@ -122,9 +122,12 @@ fn handle(app: &mut App, code: KeyCode) -> bool {
             KeyCode::Enter => act(app, |app| app.commit_edit()),
             KeyCode::Esc => app.cancel_edit(),
             KeyCode::Backspace => app.edit_pop(),
-            // The upright keys walk the choices a value offers.
+            // The upright keys walk the choices a value offers, and the
+            // sideways ones move along a scale.
             KeyCode::Up => app.edit_step(-1),
             KeyCode::Down => app.edit_step(1),
+            KeyCode::Left => app.edit_nudge(-HUE_STEP),
+            KeyCode::Right => app.edit_nudge(HUE_STEP),
             KeyCode::Char(character) => app.edit_push(character),
             _ => {}
         }
