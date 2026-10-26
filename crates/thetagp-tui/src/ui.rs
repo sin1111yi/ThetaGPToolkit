@@ -27,7 +27,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         constraints.push(Constraint::Length(10));
     }
     constraints.push(Constraint::Length(5)); // profiles
-    constraints.push(Constraint::Length(3)); // status
+    constraints.push(Constraint::Length(4)); // status
 
     let areas = Layout::default()
         .direction(Direction::Vertical)
@@ -293,13 +293,22 @@ fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Some(error) => Span::styled(format!(" {error}"), Style::default().fg(Color::Red)),
         None => Span::styled(format!(" {}", app.message), Style::default().fg(MUTED)),
     };
-    let help = Span::styled(
-        "  tab pane · enter connect/edit/activate · n new profile · x delete (twice) · w save · l load · t snapshot · r restore · d disconnect · q quit",
-        Style::default().fg(Color::DarkGray),
-    );
+    // The keys are a line a reader scans, and the whole of them is wider than a
+    // terminal: they are written on two.
+    let help = vec![
+        Line::from(Span::styled(
+            "  tab pane · enter connect / edit a value / activate a profile · n new profile · x delete (twice)",
+            Style::default(),
+        )),
+        Line::from(Span::styled(
+            "  w save · l load · t snapshot · r restore · d disconnect · q quit",
+            Style::default(),
+        )),
+    ];
+    let mut lines = vec![Line::from(message)];
+    lines.extend(help);
     frame.render_widget(
-        Paragraph::new(vec![Line::from(message), Line::from(help)])
-            .block(Block::default().borders(Borders::TOP)),
+        Paragraph::new(lines).block(Block::default().borders(Borders::TOP)),
         area,
     );
 }
