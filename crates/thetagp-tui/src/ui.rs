@@ -16,6 +16,9 @@ use crate::labels;
 
 const ACCENT: Color = Color::Rgb(90, 156, 255);
 const MUTED: Color = Color::Rgb(139, 146, 156);
+// What a reader checks before acting -- the key a value goes into, the profile
+// a change lands in -- is set apart from the blue of what is being written.
+pub(crate) const HIGHLIGHT: Color = Color::Rgb(232, 176, 96);
 
 pub fn draw(frame: &mut Frame, app: &App) {
     // The body on the left, and the choices the item in focus offers on the
@@ -72,32 +75,33 @@ fn draw_edit(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let (key, choices, _) = app.options();
     let elements = app.edit_elements();
     let title = match editing.target {
-        Target::Key(_) => format!(" edit \u{00b7} {key} "),
-        Target::Remap(slot) => format!(" edit \u{00b7} input {slot:02} "),
+        Target::Key(_) => format!(" edit · {key} "),
+        Target::Remap(slot) => format!(" edit · input {slot:02} "),
         Target::ProfileName(row) => format!(
-            " edit \u{00b7} profile {} ",
+            " edit · profile {} ",
             app.profiles.get(row).map(|entry| entry.id).unwrap_or(0)
         ),
     };
-    let hint = match editing.target {
+    // The key a value is written into, and what it may be: which of a table's
+    // keys is under the writer is what a reader checks before typing, so it is
+    // the one piece of the line set apart.
+    let (position, space) = match editing.target {
         Target::Key(row) => match app.keys.get(row) {
             // A value drawn from the schema's enum is read by name, and the
             // name is what a reader is looking at while choosing its number.
             Some(key) => {
                 let space = match &key.value_enum {
-                    Some(named) => format!("{named} \u{00b7} {}..{}", key.min, key.max),
+                    Some(named) => format!("{named} · {}..{}", key.min, key.max),
                     None => format!("a number in {}..{}", key.min, key.max),
                 };
-                if elements > 1 {
-                    format!("slot {} of {elements} \u{00b7} {space}", editing.slot + 1)
-                } else {
-                    space
-                }
+                let position =
+                    (elements > 1).then(|| format!("key {} of {elements}", editing.slot + 1));
+                (position, space)
             }
-            None => String::new(),
+            None => (None, String::new()),
         },
-        Target::Remap(_) => "the button this input feeds".to_string(),
-        Target::ProfileName(_) => "the name its body carries".to_string(),
+        Target::Remap(_) => (None, "the button this input feeds".to_string()),
+        Target::ProfileName(_) => (None, "the name its body carries".to_string()),
     };
 
     // Whatever is under the keys wins over the value on the device: it is the
@@ -132,15 +136,21 @@ fn draw_edit(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ])
         .split(inner);
 
+    let mut described = vec![Span::raw("  ")];
+    if let Some(position) = &position {
+        described.push(Span::styled(
+            format!("{position} · "),
+            Style::default().fg(HIGHLIGHT).add_modifier(Modifier::BOLD),
+        ));
+    }
+    described.push(Span::styled(space, Style::default().fg(MUTED)));
+
     let head = vec![
         Line::from(vec![
             Span::styled(" > ", Style::default().fg(MUTED)),
-            Span::styled(format!("{text}\u{258F}"), Style::default().fg(ACCENT)),
+            Span::styled(format!("{text}▏"), Style::default().fg(ACCENT)),
         ]),
-        Line::from(Span::styled(
-            format!("  {hint}"),
-            Style::default().fg(MUTED),
-        )),
+        Line::from(described),
     ];
     frame.render_widget(Paragraph::new(head), rows[0]);
 
@@ -165,7 +175,7 @@ fn draw_edit(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 let held_now = Some(*number) == held;
                 let label = format!(
                     " {} {name} ({number})",
-                    if held_now { "\u{2192}" } else { " " }
+                    if held_now { "→" } else { " " }
                 );
                 ListItem::new(label).style(if held_now {
                     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
@@ -187,9 +197,9 @@ fn draw_edit(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     }
 
     let footer = match (choices.is_empty(), elements > 1) {
-        (true, _) => "  enter write \u{00b7} esc cancel",
-        (false, true) => "  \u{2190}\u{2192} slot \u{00b7} \u{2191}\u{2193} value \u{00b7} enter \u{00b7} esc",
-        (false, false) => "  \u{2191}\u{2193} value \u{00b7} enter write \u{00b7} esc cancel",
+        (true, _) => "  enter write · esc cancel",
+        (false, true) => "  ←→ slot · ↑↓ value · enter · esc",
+        (false, false) => "  ↑↓ value · enter write · esc cancel",
     };
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
@@ -232,7 +242,10 @@ fn draw_header(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ]),
         Line::from(vec![
             Span::styled(format!(" [{source}]"), Style::default()),
-            Span::styled(format!("  {editing}"), Style::default().fg(ACCENT)),
+            Span::styled(
+                format!("  {editing}"),
+                Style::default().fg(HIGHLIGHT).add_modifier(Modifier::BOLD),
+            ),
         ]),
     ];
     frame.render_widget(
@@ -490,7 +503,10 @@ fn draw_profiles(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 spans.push(Span::styled(format!(" {named}"), Style::default().fg(ACCENT)));
             }
             if entry.active {
-                spans.push(Span::styled(" · active", Style::default().fg(ACCENT)));
+                spans.push(Span::styled(
+                    " · active",
+                    Style::default().fg(HIGHLIGHT).add_modifier(Modifier::BOLD),
+                ));
             }
             // The factory profile is the board's own: the store refuses a write
             // to it, so the list says which one it is.

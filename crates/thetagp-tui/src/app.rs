@@ -1049,6 +1049,44 @@ mod tests {
     }
 
     #[test]
+    fn the_key_a_value_goes_into_is_set_apart_in_its_own_colour() {
+        let mut app = App::at(daemon_on_sim());
+        app.refresh().expect("a state");
+        app.selected = row_of(&app, "map.btn_map");
+        app.begin_edit().expect("the table is editable");
+        app.edit_slot(4);
+
+        assert!(
+            screen(&app).contains("key 5 of 8"),
+            "the key of the table is named"
+        );
+        assert_eq!(
+            colour_of(&app, "key 5 of 8"),
+            Some(crate::ui::HIGHLIGHT),
+            "and read in the colour kept for what is checked before typing"
+        );
+    }
+
+    #[test]
+    fn the_profile_a_change_lands_in_is_set_apart_too() {
+        let app = {
+            let mut app = App::at(daemon_on_sim());
+            app.refresh().expect("a state");
+            app
+        };
+
+        assert!(
+            screen(&app).contains("editing #0"),
+            "the header names the profile the device runs from"
+        );
+        assert_eq!(
+            colour_of(&app, "editing #0"),
+            Some(crate::ui::HIGHLIGHT),
+            "in the same colour, so the two read as one kind of fact"
+        );
+    }
+
+    #[test]
     fn the_upright_keys_walk_the_choices_a_value_offers() {
         let mut app = App::at(daemon_on_sim());
         app.refresh().expect("a state");
@@ -1098,22 +1136,44 @@ mod tests {
         );
     }
 
-    /// The screen as text, without a terminal to hold it.
-    fn screen(app: &App) -> String {
+    /// The screen as a terminal holds it: the cells, with what each is drawn in.
+    fn buffer_of(app: &App) -> ratatui::buffer::Buffer {
         let backend = ratatui::backend::TestBackend::new(100, 40);
         let mut terminal = ratatui::Terminal::new(backend).expect("a terminal");
         terminal
             .draw(|frame| crate::ui::draw(frame, app))
             .expect("a frame");
-        let buffer = terminal.backend().buffer();
+        terminal.backend().buffer().clone()
+    }
+
+    /// One row of the screen as text.
+    fn row_text(buffer: &ratatui::buffer::Buffer, y: u16) -> String {
+        (0..buffer.area.width)
+            .map(|x| buffer[(x, y)].symbol().to_string())
+            .collect()
+    }
+
+    /// The screen as text, without a terminal to hold it.
+    fn screen(app: &App) -> String {
+        let buffer = buffer_of(app);
         let mut text = String::new();
         for y in 0..buffer.area.height {
-            for x in 0..buffer.area.width {
-                text.push_str(buffer[(x, y)].symbol());
-            }
+            text.push_str(&row_text(&buffer, y));
             text.push('\n');
         }
         text
+    }
+
+    /// The colour the first cell of `text` is drawn in, or none when the screen
+    /// does not carry it.
+    fn colour_of(app: &App, text: &str) -> Option<ratatui::style::Color> {
+        let buffer = buffer_of(app);
+        for y in 0..buffer.area.height {
+            if let Some(at) = row_text(&buffer, y).find(text) {
+                return Some(buffer[(at as u16, y)].fg);
+            }
+        }
+        None
     }
 
     #[test]
