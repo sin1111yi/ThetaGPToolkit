@@ -111,6 +111,11 @@ fn handle(app: &mut App, code: KeyCode) -> bool {
             KeyCode::Enter => act(app, |app| app.commit_edit()),
             KeyCode::Esc => app.cancel_edit(),
             KeyCode::Backspace => app.edit_pop(),
+            // The keys walk the choices a value offers, and a table's slots.
+            KeyCode::Up => app.edit_step(-1),
+            KeyCode::Down => app.edit_step(1),
+            KeyCode::Left => app.edit_slot(-1),
+            KeyCode::Right => app.edit_slot(1),
             KeyCode::Char(character) => app.edit_push(character),
             _ => {}
         }

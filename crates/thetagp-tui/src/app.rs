@@ -70,6 +70,40 @@ pub enum Target {
 pub struct Editing {
     pub target: Target,
     pub text: String,
+    /// Which element of a table the value under the keys is: a key that holds a
+    /// run is written one slot at a time, and a scalar keeps the first.
+    pub slot: usize,
+    /// Whether the next character replaces the element instead of extending it:
+    /// an element is under the keys when it opens, so typing picks a value
+    /// rather than appending to the one already there.
+    pub fresh: bool,
+}
+
+impl Editing {
+    /// The elements the text holds: a scalar carries one, a table one per slot.
+    fn parts(&self) -> Vec<String> {
+        self.text
+            .split(',')
+            .map(|part| part.trim().to_string())
+            .collect()
+    }
+
+    /// Writes one element and leaves the rest as they were.
+    fn write_part(&mut self, at: usize, value: String) {
+        let mut parts = self.parts();
+        if let Some(part) = parts.get_mut(at) {
+            *part = value;
+            self.text = parts.join(", ");
+        }
+    }
+
+    /// The element the keys are in, or the whole value for a scalar.
+    fn part(&self) -> String {
+        self.parts()
+            .get(self.slot)
+            .cloned()
+            .unwrap_or_default()
+    }
 }
 
 /// Everything one screen shows.
@@ -276,6 +310,11 @@ impl App {
         }
     }
 
+    /// Whether the key at that row holds a run rather than one number.
+    pub fn is_array(&self, row: usize) -> bool {
+        matches!(self.keys.get(row).map(|key| key.kind), Some(KeyType::U8Array))
+    }
+
     /// The text a value is edited in: a number, or a run of them.
     pub fn value_text(&self, row: usize) -> String {
         let Some(key) = self.keys.get(row) else {
@@ -345,6 +384,8 @@ impl App {
                 self.editing = Some(Editing {
                     target: Target::ProfileName(self.profile_selected),
                     text: entry.name.clone(),
+                    slot: 0,
+                    fresh: false,
                 });
             }
             Pane::Remap => {
@@ -355,6 +396,8 @@ impl App {
                 self.editing = Some(Editing {
                     target: Target::Remap(slot),
                     text: self.remap_text(slot),
+                    slot: 0,
+                    fresh: true,
                 });
             }
             _ => {
@@ -365,21 +408,133 @@ impl App {
                 self.editing = Some(Editing {
                     target: Target::Key(row),
                     text: self.value_text(row),
+                    slot: 0,
+                    fresh: true,
                 });
             }
         }
         Ok(())
     }
 
+    /// Writes a character into the element under the keys: the first one
+    /// replaces what the element held, and the rest extend it.
     pub fn edit_push(&mut self, character: char) {
-        if let Some(editing) = self.editing.as_mut() {
-            editing.text.push(character);
+        let Some(editing) = self.editing.as_mut() else {
+            return;
+        };
+        if editing.fresh {
+            editing.write_part(editing.slot, String::new());
+            editing.fresh = false;
         }
+        let mut part = editing.part();
+        part.push(character);
+        editing.write_part(editing.slot, part);
     }
 
     pub fn edit_pop(&mut self) {
-        if let Some(editing) = self.editing.as_mut() {
-            editing.text.pop();
+        let Some(editing) = self.editing.as_mut() else {
+            return;
+        };
+        let mut part = editing.part();
+        part.pop();
+        editing.write_part(editing.slot, part);
+        editing.fresh = false;
+    }
+
+    /// The elements the value being written has: a table's slots, or one.
+    pub fn edit_elements(&self) -> usize {
+        let Some(editing) = self.editing.as_ref() else {
+            return 1;
+        };
+        match editing.target {
+            Target::Key(row) if self.is_array(row) => {
+                (self.keys.get(row).map(|key| key.count).unwrap_or(0) as usize).max(1)
+            }
+            _ => 1,
+        }
+    }
+
+    /// Moves the keys to another element of a table, wrapping at its ends.
+    pub fn edit_slot(&mut self, by: i32) {
+        let count = self.edit_elements();
+        if count < 2 {
+            return;
+        }
+        let Some(editing) = self.editing.as_mut() else {
+            return;
+        };
+        editing.slot = (editing.slot as i32 + by).rem_euclid(count as i32) as usize;
+        editing.fresh = true;
+    }
+
+    /// Steps the element under the keys to the next value it may take: the one
+    /// beside it in the schema's names, or the number one along its range.
+    pub fn edit_step(&mut self, by: i32) {
+        if !matches!(
+            self.editing.as_ref().map(|editing| editing.target),
+            Some(Target::Key(_)) | Some(Target::Remap(_))
+        ) {
+            return;
+        }
+        let choices = self.options().1;
+        let bounds = self.edited_bounds();
+        let Some(editing) = self.editing.as_mut() else {
+            return;
+        };
+        let at = editing.slot;
+        let held = editing
+            .parts()
+            .get(at)
+            .and_then(|part| part.parse::<i32>().ok());
+
+        let next = if !choices.is_empty() {
+            let position =
+                held.and_then(|held| choices.iter().position(|(_, number)| *number == held));
+            match position {
+                Some(position) => {
+                    let moved = position as i32 + by;
+                    choices[moved.rem_euclid(choices.len() as i32) as usize].1
+                }
+                None if by < 0 => choices[choices.len() - 1].1,
+                None => choices[0].1,
+            }
+        } else if let Some((min, max)) = bounds {
+            (held.unwrap_or(min) + by).clamp(min, max)
+        } else {
+            return;
+        };
+        editing.write_part(at, next.to_string());
+        editing.fresh = true;
+    }
+
+    /// The text under the keys: one element of a table, or the whole value.
+    pub fn edit_text(&self) -> String {
+        self.editing
+            .as_ref()
+            .map(|editing| editing.part())
+            .unwrap_or_default()
+    }
+
+    /// The value the device holds at the element being edited.
+    pub fn edit_value(&self) -> Option<i32> {
+        let editing = self.editing.as_ref()?;
+        match editing.target {
+            Target::Key(row) => match self.values.get(&self.keys.get(row)?.name)? {
+                Value::Scalar(number) => Some(*number as i32),
+                Value::Array(run) => run.get(editing.slot).copied(),
+            },
+            Target::Remap(slot) => self.remap_values().get(slot).copied(),
+            Target::ProfileName(_) => None,
+        }
+    }
+
+    /// The range the number under the keys is held to, when its key declares
+    /// one: the schema's names are preferred over it.
+    fn edited_bounds(&self) -> Option<(i32, i32)> {
+        match self.editing.as_ref()?.target {
+            Target::Key(row) => self.keys.get(row).map(|key| (key.min, key.max)),
+            Target::Remap(_) => self.remap_key().map(|key| (key.min, key.max)),
+            Target::ProfileName(_) => None,
         }
     }
 
@@ -886,6 +1041,63 @@ mod tests {
         assert!(app.message.starts_with("restored"), "{}", app.message);
     }
 
+    fn row_of(app: &App, name: &str) -> usize {
+        app.keys
+            .iter()
+            .position(|key| key.name == name)
+            .expect("the key is declared")
+    }
+
+    #[test]
+    fn the_upright_keys_walk_the_choices_a_value_offers() {
+        let mut app = App::at(daemon_on_sim());
+        app.refresh().expect("a state");
+        app.pane = Pane::Remap;
+        app.begin_edit().expect("a slot to edit");
+
+        let opening = app.edit_text();
+        app.edit_step(1);
+        assert_ne!(app.edit_text(), opening, "a key steps the value");
+        app.edit_step(-1);
+        assert_eq!(app.edit_text(), opening, "and steps it back");
+    }
+
+    #[test]
+    fn the_sideways_keys_walk_a_table_slot_by_slot() {
+        let mut app = App::at(daemon_on_sim());
+        app.refresh().expect("a state");
+        app.selected = row_of(&app, "map.btn_map");
+        app.begin_edit().expect("the table is editable");
+
+        assert_eq!(app.edit_text(), "1", "the first slot is under the keys");
+        app.edit_slot(1);
+        assert_eq!(app.edit_text(), "2", "the next one carries its own value");
+        app.edit_slot(-1);
+        assert_eq!(app.edit_text(), "1");
+    }
+
+    #[test]
+    fn a_typed_digit_replaces_the_element_it_opens_on() {
+        let mut app = App::at(daemon_on_sim());
+        app.refresh().expect("a state");
+        app.selected = row_of(&app, "map.btn_map");
+        app.begin_edit().expect("the table is editable");
+        app.edit_slot(1);
+        app.edit_push('9');
+
+        assert_eq!(
+            app.edit_text(),
+            "9",
+            "the first digit is the value, not a digit appended to it"
+        );
+        app.commit_edit().expect("the table is written");
+        assert_eq!(
+            app.values.get("map.btn_map"),
+            Some(&Value::Array(vec![1, 9, 3, 4, 5, 6, 7, 8])),
+            "one slot moved and the rest stood still"
+        );
+    }
+
     /// The screen as text, without a terminal to hold it.
     fn screen(app: &App) -> String {
         let backend = ratatui::backend::TestBackend::new(100, 40);
@@ -909,25 +1121,38 @@ mod tests {
         let mut app = App::at(daemon_on_sim());
         app.refresh().expect("a state");
         app.pane = Pane::Remap;
+        let plain = screen(&app);
+
         app.begin_edit().expect("a slot to edit");
         app.editing.as_mut().expect("an edit").text = "4".into();
+        let boxed = screen(&app);
 
-        let text = screen(&app);
         assert!(
-            text.contains("edit · input 00"),
+            boxed.contains("edit · input 00"),
             "the box names the field it holds"
         );
         assert!(
-            text.contains("enter write · esc cancel"),
-            "and the keys that leave it"
+            boxed.contains("↑↓ value · enter write · esc cancel"),
+            "and the keys it answers to"
         );
         assert!(
-            text.contains("UP (0)") && text.contains("E8 (31)"),
+            boxed.contains("UP (0)") && boxed.contains("E8 (31)"),
             "every name the value may take is in it"
         );
         assert!(
-            text.contains("\u{2192}B1 (4)"),
+            boxed.contains("→B1 (4)"),
             "the value being typed is the one marked"
         );
+
+        // The box keeps to the device's column: what a value may be is still
+        // read on the right while it is typed.
+        let choices = |line: &str| line.chars().skip(68).collect::<String>();
+        for (at, (left, right)) in plain.lines().zip(boxed.lines()).enumerate() {
+            assert_eq!(
+                choices(left),
+                choices(right),
+                "line {at} of the choices column was drawn over"
+            );
+        }
     }
 }

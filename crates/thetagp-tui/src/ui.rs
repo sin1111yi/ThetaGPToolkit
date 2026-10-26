@@ -26,7 +26,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
         .split(frame.area());
     draw_body(frame, app, columns[0]);
     draw_options(frame, app, columns[1]);
-    draw_edit(frame, app);
+    // The choices column stays whole: the box a value is typed in sits over the
+    // device alone, so what the value may be is read beside it.
+    draw_edit(frame, app, columns[0]);
 }
 
 fn draw_body(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -61,12 +63,13 @@ fn draw_body(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
 /// The value being typed, in a box of its own over the device: a row of the
 /// table is too narrow to hold a value and the names it may take beside it.
-fn draw_edit(frame: &mut Frame, app: &App) {
+fn draw_edit(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let Some(editing) = &app.editing else {
         return;
     };
 
-    let (key, choices, current) = app.options();
+    let (key, choices, _) = app.options();
+    let elements = app.edit_elements();
     let title = match editing.target {
         Target::Key(_) => format!(" edit · {key} "),
         Target::Remap(slot) => format!(" edit · input {slot:02} "),
@@ -78,35 +81,39 @@ fn draw_edit(frame: &mut Frame, app: &App) {
     let hint = match editing.target {
         Target::Key(row) => match app.keys.get(row) {
             // A value drawn from the schema's enum is read by name, and the
-            // name is what a reader is looking at while typing its number.
-            Some(key) => match &key.value_enum {
-                Some(named) => format!("{named}: a number in {}..{}", key.min, key.max),
-                None => format!("a number in {}..{}", key.min, key.max),
-            },
+            // name is what a reader is looking at while choosing its number.
+            Some(key) => {
+                let space = match &key.value_enum {
+                    Some(named) => format!("{named} \u{00b7} {}..{}", key.min, key.max),
+                    None => format!("a number in {}..{}", key.min, key.max),
+                };
+                if elements > 1 {
+                    format!("slot {} of {elements} \u{00b7} {space}", editing.slot + 1)
+                } else {
+                    space
+                }
+            }
             None => String::new(),
         },
         Target::Remap(_) => "the button this input feeds".to_string(),
         Target::ProfileName(_) => "the name its body carries".to_string(),
     };
 
-    // Whatever is being typed wins over the value on the device: it is the one
-    // the reader is choosing between.
-    let typed: Option<i32> = editing.text.trim().parse().ok();
-    let held = typed.or(current);
+    // Whatever is under the keys wins over the value on the device: it is the
+    // one the reader is choosing between.
+    let text = app.edit_text();
+    let typed: Option<i32> = text.trim().parse().ok();
+    let held = typed.or_else(|| app.edit_value());
 
-    let screen = frame.area();
-    let width = ((u32::from(screen.width) * 2 / 3) as u16)
-        .max(44)
-        .min(screen.width);
+    // The box keeps to the left column, one column in from its edges.
+    let screen = area;
+    let width = screen.width.saturating_sub(2).max(20);
     let inner = usize::from(width.saturating_sub(2));
 
     let mut lines = vec![
         Line::from(vec![
             Span::styled(" > ", Style::default().fg(MUTED)),
-            Span::styled(
-                format!("{}\u{258F}", editing.text),
-                Style::default().fg(ACCENT),
-            ),
+            Span::styled(format!("{text}\u{258F}"), Style::default().fg(ACCENT)),
         ]),
         Line::from(Span::styled(format!("  {hint}"), Style::default().fg(MUTED))),
         Line::from(""),
@@ -158,10 +165,16 @@ fn draw_edit(frame: &mut Frame, app: &App) {
     // still carries all of it, one row each.
     let room = usize::from(screen.height.saturating_sub(2)).saturating_sub(5);
     lines.extend(choice_lines.into_iter().take(room.max(1)));
-    lines.push(Line::from(Span::styled(
-        "  enter write · esc cancel",
-        Style::default().fg(MUTED),
-    )));
+    // The keys a box answers to: a table's slots are walked by the sideways
+    // keys, and a value by the upright ones.
+    let footer = match (choices.is_empty(), elements > 1) {
+        (true, _) => "  enter write \u{00b7} esc cancel",
+        (false, true) => {
+            "  \u{2190}\u{2192} slot \u{00b7} \u{2191}\u{2193} value \u{00b7} enter write \u{00b7} esc cancel"
+        }
+        (false, false) => "  \u{2191}\u{2193} value \u{00b7} enter write \u{00b7} esc cancel",
+    };
+    lines.push(Line::from(Span::styled(footer, Style::default().fg(MUTED))));
 
     let height = (lines.len() as u16 + 2).min(screen.height);
     let dialog = ratatui::layout::Rect {
