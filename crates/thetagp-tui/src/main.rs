@@ -122,11 +122,9 @@ fn handle(app: &mut App, code: KeyCode) -> bool {
             KeyCode::Enter => act(app, |app| app.commit_edit()),
             KeyCode::Esc => app.cancel_edit(),
             KeyCode::Backspace => app.edit_pop(),
-            // The keys walk the choices a value offers, and a table's slots.
+            // The upright keys walk the choices a value offers.
             KeyCode::Up => app.edit_step(-1),
             KeyCode::Down => app.edit_step(1),
-            KeyCode::Left => app.edit_slot(-1),
-            KeyCode::Right => app.edit_slot(1),
             KeyCode::Char(character) => app.edit_push(character),
             _ => {}
         }
@@ -147,10 +145,18 @@ fn handle(app: &mut App, code: KeyCode) -> bool {
         KeyCode::Up => step(app, -1),
         KeyCode::Down => step(app, 1),
         KeyCode::Enter => match app.pane {
-            Pane::Keys | Pane::Remap => act(app, |app| app.begin_edit()),
+            // A domain opens or closes, a key is edited: the menu answers the
+            // one key with what the line in focus is.
+            Pane::Keys => act(app, |app| app.open_selected()),
+            Pane::Remap => act(app, |app| app.begin_edit()),
             Pane::Profiles => act(app, |app| app.select_profile()),
             Pane::Sources => act(app, |app| app.connect()),
         },
+        // The sideways keys walk the levels of the options menu: a segment is
+        // gone into, and the way back out is the one a reader already knows.
+        KeyCode::Left if app.pane == Pane::Keys => act(app, |app| app.go_up()),
+        KeyCode::Right if app.pane == Pane::Keys => act(app, |app| app.go_in()),
+        KeyCode::Esc if app.pane == Pane::Keys => act(app, |app| app.go_up()),
         KeyCode::Char('c') => act(app, |app| app.connect()),
         KeyCode::Char('d') => act(app, |app| app.disconnect()),
         KeyCode::Char('w') => act(app, |app| app.save()),
@@ -190,7 +196,10 @@ fn step(app: &mut App, delta: i32) {
 
     let remap_len = app.remap_len();
     match app.pane {
-        Pane::Keys => move_within(&mut app.selected, app.keys.len()),
+        Pane::Keys => {
+            let lines = app.rows().len();
+            move_within(&mut app.selected, lines);
+        }
         Pane::Remap => move_within(&mut app.remap_selected, remap_len),
         Pane::Profiles => move_within(&mut app.profile_selected, app.profiles.len()),
         Pane::Sources => {

@@ -21,17 +21,22 @@ const MUTED: Color = Color::Rgb(139, 146, 156);
 pub(crate) const HIGHLIGHT: Color = Color::Rgb(232, 176, 96);
 
 pub fn draw(frame: &mut Frame, app: &App) {
-    // The body on the left, and the choices the item in focus offers on the
-    // right: a value's names are the schema's, and reading them beside the
-    // field is what saves a lookup.
+    // The body on the left, the choices the item in focus offers on the right,
+    // and the keys on a line under both: the help is as wide as the terminal,
+    // which is what keeps it from being cut at the body's edge.
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(9), Constraint::Length(4)])
+        .split(frame.area());
     let columns = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(68), Constraint::Percentage(32)])
-        .split(frame.area());
+        .split(rows[0]);
     draw_body(frame, app, columns[0]);
     draw_options(frame, app, columns[1]);
     // The choices column stays whole: the box a value is typed in sits over the
     // device alone, so what the value may be is read beside it.
+    draw_status(frame, app, rows[1]);
     draw_edit(frame, app, columns[0]);
     draw_confirm(frame, app, columns[0]);
 }
@@ -44,10 +49,16 @@ fn draw_body(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     ];
     let has_remap = app.remap_len() > 0;
     if has_remap {
-        constraints.push(Constraint::Length(10));
+        // The remap pane is as tall as the inputs this board wires: a board with
+        // four does not leave room for four it does not have.
+        let height = (app.remap_len() as u16 + 4).min(10);
+        constraints.push(Constraint::Length(height));
     }
-    constraints.push(Constraint::Length(5)); // profiles
-    constraints.push(Constraint::Length(4)); // status
+    // A board with two profiles does not reserve the height of six, and the
+    // room goes to the menu above it.
+    constraints.push(Constraint::Length(
+        (app.profiles.len() as u16 + 2).clamp(3, 6),
+    )); // profiles
 
     let areas = Layout::default()
         .direction(Direction::Vertical)
@@ -63,7 +74,6 @@ fn draw_body(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         at += 1;
     }
     draw_profiles(frame, app, areas[at]);
-    draw_status(frame, app, areas[at + 1]);
 }
 
 /// The value being typed, in a box of its own over the device: a row of the
@@ -73,8 +83,7 @@ fn draw_edit(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         return;
     };
 
-    let (key, choices, _) = app.options();
-    let elements = app.edit_elements();
+    let (key, choices, current) = app.options();
     let title = match editing.target {
         Target::Key(_) => format!(" edit · {key} "),
         Target::Remap(slot) => format!(" edit · input {slot:02} "),
@@ -83,33 +92,25 @@ fn draw_edit(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             app.profiles.get(row).map(|entry| entry.id).unwrap_or(0)
         ),
     };
-    // The button a value is written into, and what it may be: which of a
-    // table's buttons is under the writer is what a reader checks before
-    // typing, so it is the one piece of the line set apart.
-    let (position, space) = match editing.target {
+    let hint = match editing.target {
         Target::Key(row) => match app.keys.get(row) {
             // A value drawn from the schema's enum is read by name, and the
             // name is what a reader is looking at while choosing its number.
-            Some(key) => {
-                let space = match &key.value_enum {
-                    Some(named) => format!("{named} · {}..{}", key.min, key.max),
-                    None => format!("a number in {}..{}", key.min, key.max),
-                };
-                let position =
-                    (elements > 1).then(|| format!("button {} of {elements}", editing.slot + 1));
-                (position, space)
-            }
-            None => (None, String::new()),
+            Some(key) => match &key.value_enum {
+                Some(named) => format!("{named} · {}..{}", key.min, key.max),
+                None => format!("a number in {}..{}", key.min, key.max),
+            },
+            None => String::new(),
         },
-        Target::Remap(_) => (None, "the button this input feeds".to_string()),
-        Target::ProfileName(_) => (None, "the name its body carries".to_string()),
+        Target::Remap(_) => "the button this input feeds".to_string(),
+        Target::ProfileName(_) => "the name its body carries".to_string(),
     };
 
     // Whatever is under the keys wins over the value on the device: it is the
     // one the reader is choosing between.
-    let text = app.edit_text();
+    let text = editing.text.as_str();
     let typed: Option<i32> = text.trim().parse().ok();
-    let held = typed.or_else(|| app.edit_value());
+    let held = typed.or(current);
 
     // The box keeps to the device's column and holds a handful of names at a
     // time: the list scrolls under the value, so a reader picks from the names
@@ -132,21 +133,15 @@ fn draw_edit(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ])
         .split(inner);
 
-    let mut described = vec![Span::raw("  ")];
-    if let Some(position) = &position {
-        described.push(Span::styled(
-            format!("{position} · "),
-            Style::default().fg(HIGHLIGHT).add_modifier(Modifier::BOLD),
-        ));
-    }
-    described.push(Span::styled(space, Style::default().fg(MUTED)));
-
     let head = vec![
         Line::from(vec![
             Span::styled(" > ", Style::default().fg(MUTED)),
             Span::styled(format!("{text}▏"), Style::default().fg(ACCENT)),
         ]),
-        Line::from(described),
+        Line::from(Span::styled(
+            format!("  {hint}"),
+            Style::default().fg(MUTED),
+        )),
     ];
     frame.render_widget(Paragraph::new(head), rows[0]);
 
@@ -192,10 +187,10 @@ fn draw_edit(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         }
     }
 
-    let footer = match (choices.is_empty(), elements > 1) {
-        (true, _) => "  enter write · esc cancel",
-        (false, true) => "  ←→ slot · ↑↓ value · enter · esc",
-        (false, false) => "  ↑↓ value · enter write · esc cancel",
+    let footer = if choices.is_empty() {
+        "  enter write · esc cancel"
+    } else {
+        "  ↑↓ value · enter write · esc cancel"
     };
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
@@ -204,6 +199,20 @@ fn draw_edit(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ))),
         rows[2],
     );
+}
+
+/// The pane's title: the menu's top, or the path the reader has gone down.
+fn menu_title(app: &App) -> String {
+    if app.path.is_empty() {
+        return format!(" options ({}) ", app.menu_count());
+    }
+    format!(" options › {} ", app.path.join(" › "))
+}
+
+/// How many keys a segment holds, in words: a segment of one is not a segment
+/// of many.
+fn key_count(count: usize) -> String {
+    format!("{count} key{}", if count == 1 { "" } else { "s" })
 }
 
 /// A box over the device's column, centred in it: the panes it is read against
@@ -310,18 +319,30 @@ fn draw_header(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 fn draw_options(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let (key, choices, current) = app.options();
     let title = if key.is_empty() {
-        " options ".to_string()
+        " choices ".to_string()
     } else {
-        format!(" options · {key} ")
+        format!(" choices · {key} ")
     };
     let block = Block::default().borders(Borders::ALL).title(title);
 
     if choices.is_empty() {
-        let hint = match app.keys.get(app.selected) {
-            Some(key) if app.pane == Pane::Keys || app.pane == Pane::Remap => format!(
-                " a number in {}..{}",
-                key.min, key.max
-            ),
+        // A domain line holds keys rather than a value, and what the reader can
+        // do with it is the fold: the hint says so where the choices would be.
+        let hint = match app.pane {
+            Pane::Keys => match app.rows().get(app.selected) {
+                Some(crate::app::Row::Group { keys, .. }) => {
+                    format!(" {} · enter goes in", key_count(*keys))
+                }
+                Some(crate::app::Row::Key(row)) => match app.keys.get(*row) {
+                    Some(key) => format!(" a number in {}..{}", key.min, key.max),
+                    None => " nothing to choose here".to_string(),
+                },
+                None => " nothing to choose here".to_string(),
+            },
+            Pane::Remap => match app.remap_key() {
+                Some(key) => format!(" a number in {}..{}", key.min, key.max),
+                None => " nothing to choose here".to_string(),
+            },
             _ => " nothing to choose here".to_string(),
         };
         frame.render_widget(
@@ -396,51 +417,27 @@ fn draw_keys(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border))
-        .title(format!(" keys ({}) ", app.keys.len()));
+        .title(menu_title(app));
 
     let rows: Vec<Row> = app
-        .keys
+        .rows()
         .iter()
-        .enumerate()
-        .map(|(index, key)| {
-            let shown = match &app.editing {
-                Some(editing) if editing.target == Target::Key(index) => {
-                    format!("{}▏", editing.text)
-                }
-                _ => app.value_display(index),
-            };
-            let style = if matches!(&app.editing, Some(editing) if editing.target == Target::Key(index)) {
-                Style::default().fg(ACCENT)
-            } else {
-                Style::default()
-            };
-            let named = match labels::label(&key.name) {
-                Some(label) => Line::from(vec![
-                    Span::raw(label.to_string()),
-                    Span::styled(format!(" ({})", key.name), Style::default().fg(Color::DarkGray)),
+        .map(|line| match line {
+            // A segment is a line of its own, and the way into the level under
+            // it: the arrow says there is more below, the count says how much.
+            crate::app::Row::Group { segment, keys } => Row::new(vec![Cell::from(
+                Line::from(vec![
+                    Span::styled(
+                        format!("▸ {segment}"),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(format!("  {}", key_count(*keys)), Style::default().fg(MUTED)),
                 ]),
-                None => Line::from(Span::styled(
-                    key.name.clone(),
-                    Style::default().fg(Color::DarkGray),
-                )),
-            };
-            Row::new(vec![
-                Cell::from(named),
-                Cell::from(format!(
-                    "{:?}{}",
-                    key.kind,
-                    if matches!(key.kind, KeyType::U8Array) {
-                        format!(" · {}", key.count)
-                    } else {
-                        String::new()
-                    }
-                ))
-                .style(Style::default().fg(MUTED)),
-                Cell::from(format!("{}..{}", key.min, key.max)).style(Style::default().fg(MUTED)),
-                Cell::from(shown).style(style),
-                Cell::from(if key.reboot { "at boot" } else { "" })
-                    .style(Style::default().fg(MUTED)),
-            ])
+            )]),
+            crate::app::Row::Key(index) => {
+                let key = &app.keys[*index];
+                key_row(app, key, *index)
+            }
         })
         .collect();
 
@@ -462,9 +459,51 @@ fn draw_keys(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     let mut state = TableState::default();
     if !app.keys.is_empty() {
-        state.select(Some(app.selected.min(app.keys.len() - 1)));
+        state.select(Some(app.selected.min(app.rows().len().saturating_sub(1))));
     }
     frame.render_stateful_widget(table, area, &mut state);
+}
+
+/// A key's line: the name a reader knows it by, and the name the wire uses.
+fn key_row(app: &App, key: &thetagp_client::Key, index: usize) -> Row<'static> {
+    let shown = match &app.editing {
+        Some(editing) if editing.target == Target::Key(index) => {
+            format!("{}▏", editing.text)
+        }
+        _ => app.value_display(index),
+    };
+    let style = if matches!(&app.editing, Some(editing) if editing.target == Target::Key(index)) {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default()
+    };
+    let named = match labels::label(&key.name) {
+        Some(label) => Line::from(vec![
+            Span::raw(label.to_string()),
+            Span::styled(format!(" ({})", key.name), Style::default().fg(Color::DarkGray)),
+        ]),
+        None => Line::from(Span::styled(
+            key.name.clone(),
+            Style::default().fg(Color::DarkGray),
+        )),
+    };
+    Row::new(vec![
+        Cell::from(named),
+        Cell::from(format!(
+            "{:?}{}",
+            key.kind,
+            if matches!(key.kind, KeyType::U8Array) {
+                format!(" · {}", key.count)
+            } else {
+                String::new()
+            }
+        ))
+        .style(Style::default().fg(MUTED)),
+        Cell::from(format!("{}..{}", key.min, key.max)).style(Style::default().fg(MUTED)),
+        Cell::from(shown).style(style),
+        Cell::from(if key.reboot { "at boot" } else { "" })
+            .style(Style::default().fg(MUTED)),
+    ])
 }
 
 fn draw_remap(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -596,11 +635,11 @@ fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // terminal: they are written on two.
     let help = vec![
         Line::from(Span::styled(
-            "  tab pane · enter connect / edit a value / activate a profile · n new profile · e name it · x delete",
+            "  tab pane · ←→ out of / into a level · enter connect / open / edit / activate · x delete",
             Style::default(),
         )),
         Line::from(Span::styled(
-            "  w save · l load · t snapshot · r restore · d disconnect · q quit",
+            "  n new profile · e name it · w save · l load · t snapshot · r restore · d disconnect · q quit",
             Style::default(),
         )),
     ];

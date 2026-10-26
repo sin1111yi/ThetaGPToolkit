@@ -66,6 +66,19 @@ pub enum Target {
     ProfileName(usize),
 }
 
+/// One line of the options menu at the level it is on: a segment of a key's
+/// name that holds more below it, or a key whose name ends here.
+///
+/// What the device declares is flat -- a key's name carries its own path --
+/// so the levels of the menu are the segments those names already have.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Row {
+    /// A segment further segments or keys sit under, and how many keys that is.
+    Group { segment: String, keys: usize },
+    /// A key, by its row in the device's own declaration.
+    Key(usize),
+}
+
 /// A delete the screen asks about before it is done: a board's profiles are not
 /// a file that can be restored, so what goes is named before it goes.
 #[derive(Clone, PartialEq, Eq)]
@@ -80,40 +93,10 @@ pub struct Confirm {
 pub struct Editing {
     pub target: Target,
     pub text: String,
-    /// Which element of a table the value under the keys is: a key that holds a
-    /// run is written one slot at a time, and a scalar keeps the first.
-    pub slot: usize,
-    /// Whether the next character replaces the element instead of extending it:
-    /// an element is under the keys when it opens, so typing picks a value
-    /// rather than appending to the one already there.
+    /// Whether the next character replaces the value instead of extending it: a
+    /// value is under the keys when the box opens, so typing picks one rather
+    /// than appending to the one already there.
     pub fresh: bool,
-}
-
-impl Editing {
-    /// The elements the text holds: a scalar carries one, a table one per slot.
-    fn parts(&self) -> Vec<String> {
-        self.text
-            .split(',')
-            .map(|part| part.trim().to_string())
-            .collect()
-    }
-
-    /// Writes one element and leaves the rest as they were.
-    fn write_part(&mut self, at: usize, value: String) {
-        let mut parts = self.parts();
-        if let Some(part) = parts.get_mut(at) {
-            *part = value;
-            self.text = parts.join(", ");
-        }
-    }
-
-    /// The element the keys are in, or the whole value for a scalar.
-    fn part(&self) -> String {
-        self.parts()
-            .get(self.slot)
-            .cloned()
-            .unwrap_or_default()
-    }
 }
 
 /// Everything one screen shows.
@@ -128,7 +111,10 @@ pub struct App {
     pub identity: Option<Identity>,
     pub keys: Vec<Key>,
     pub values: BTreeMap<String, Value>,
+    /// The line of the options menu in focus, at the level it is on.
     pub selected: usize,
+    /// The segments the reader has gone into: empty at the top of the menu.
+    pub path: Vec<String>,
     pub editing: Option<Editing>,
 
     /// The inputs the board wires: the remap table's real slots.
@@ -159,6 +145,7 @@ impl App {
             keys: Vec::new(),
             values: BTreeMap::new(),
             selected: 0,
+            path: Vec::new(),
             editing: None,
             remap_selected: 0,
             profiles: Vec::new(),
@@ -243,8 +230,14 @@ impl App {
             serde_json::from_value(profiles).map_err(|error| error.to_string())?;
         self.profiles = listed.profiles;
 
-        if self.selected >= self.keys.len() {
-            self.selected = self.keys.len().saturating_sub(1);
+        // A level the device no longer has is one the reader cannot stand on:
+        // the path backs out until it names what the device declares.
+        while !self.path.is_empty() && self.rows().is_empty() {
+            self.path.pop();
+        }
+        let lines = self.rows().len();
+        if self.selected >= lines {
+            self.selected = lines.saturating_sub(1);
         }
         if self.remap_selected >= self.remap_len() {
             self.remap_selected = self.remap_len().saturating_sub(1);
@@ -288,6 +281,20 @@ impl App {
             .find(|key| key.name == "map.btn_map" && matches!(key.kind, KeyType::U8Array))
     }
 
+    /// The row of the remap table, when the device declares one. The pane below
+    /// edits it, one input at a time, so the menu carries it no line.
+    pub fn remap_row(&self) -> Option<usize> {
+        self.keys
+            .iter()
+            .position(|key| key.name == "map.btn_map" && matches!(key.kind, KeyType::U8Array))
+    }
+
+    /// How many keys the menu carries: the device's own, less the table the
+    /// pane below owns.
+    pub fn menu_count(&self) -> usize {
+        self.keys.len() - usize::from(self.remap_row().is_some())
+    }
+
     /// The slots the remap table holds.
     pub fn remap_values(&self) -> Vec<i32> {
         match self.values.get("map.btn_map") {
@@ -320,11 +327,6 @@ impl App {
         }
     }
 
-    /// Whether the key at that row holds a run rather than one number.
-    pub fn is_array(&self, row: usize) -> bool {
-        matches!(self.keys.get(row).map(|key| key.kind), Some(KeyType::U8Array))
-    }
-
     /// The text a value is edited in: a number, or a run of them.
     pub fn value_text(&self, row: usize) -> String {
         let Some(key) = self.keys.get(row) else {
@@ -341,21 +343,115 @@ impl App {
         }
     }
 
+    /// The options as the screen lists them: each domain the device's keys fall
+    /// into, and the keys inside it when the reader has not closed it.
+    ///
+    /// A key's name carries its domain, and the device declares the keys of one
+    /// domain together, so a domain is a run of the list.
+    pub fn rows(&self) -> Vec<Row> {
+        let depth = self.path.len();
+        let mut rows: Vec<Row> = Vec::new();
+        // The keys whose names pass through the segments the reader has gone
+        // into, in the order the device declares them: a segment keeps the place
+        // of the first key under it, so the menu does not shuffle as it grows.
+        for (at, key) in self.keys.iter().enumerate() {
+            if Some(at) == self.remap_row() {
+                continue;
+            }
+            let segments: Vec<&str> = key.name.split('.').collect();
+            if segments.len() <= depth || segments[..depth] != self.path[..] {
+                continue;
+            }
+            if segments.len() == depth + 1 {
+                rows.push(Row::Key(at));
+                continue;
+            }
+
+            let segment = segments[depth].to_string();
+            match rows.last_mut() {
+                Some(Row::Group {
+                    segment: named,
+                    keys,
+                }) if *named == segment => *keys += 1,
+                _ => rows.push(Row::Group {
+                    segment,
+                    keys: 1,
+                }),
+            }
+        }
+        rows
+    }
+
+    /// The key the menu line in focus names, or none when the line is a segment.
+    pub fn selected_key(&self) -> Option<usize> {
+        match self.rows().get(self.selected)? {
+            Row::Key(row) => Some(*row),
+            Row::Group { .. } => None,
+        }
+    }
+
+    /// The segment the menu line in focus names, or none when it names a key.
+    pub fn focused_segment(&self) -> Option<(String, usize)> {
+        match self.rows().get(self.selected)? {
+            Row::Group { segment, keys } => Some((segment.clone(), *keys)),
+            Row::Key(_) => None,
+        }
+    }
+
+    /// `enter` on the menu: a segment is gone into, a key is edited.
+    pub fn open_selected(&mut self) -> Result<(), String> {
+        let Some((segment, _)) = self.focused_segment() else {
+            return self.begin_edit();
+        };
+        self.path.push(segment);
+        self.selected = 0;
+        Ok(())
+    }
+
+    /// `right` on the menu: the same as `enter` where the line is a segment, and
+    /// nothing where it is a key -- a key is edited, not gone into.
+    pub fn go_in(&mut self) -> Result<(), String> {
+        if self.focused_segment().is_some() {
+            self.open_selected()?;
+        }
+        Ok(())
+    }
+
+    /// `left` or `esc`: back out of the level the menu is on, onto the segment
+    /// that led into it.
+    pub fn go_up(&mut self) -> Result<(), String> {
+        let Some(segment) = self.path.pop() else {
+            return Ok(());
+        };
+        self.selected = self
+            .rows()
+            .iter()
+            .position(|row| matches!(row, Row::Group { segment: named, .. } if *named == segment))
+            .unwrap_or(0);
+        Ok(())
+    }
+
     /// The choices the item in focus offers, by the name each is read by, and
     /// the one it holds now.
     pub fn options(&self) -> (String, Vec<(String, i32)>, Option<i32>) {
         match self.pane {
-            Pane::Keys => {
-                let Some(key) = self.keys.get(self.selected) else {
-                    return (String::new(), Vec::new(), None);
-                };
-                let current = match self.values.get(&key.name) {
-                    Some(Value::Scalar(number)) => Some(*number as i32),
-                    Some(Value::Array(run)) => run.first().copied(),
-                    None => None,
-                };
-                (key.name.clone(), choices_of(key), current)
-            }
+            Pane::Keys => match self.rows().get(self.selected) {
+                Some(Row::Key(row)) => {
+                    let Some(key) = self.keys.get(*row) else {
+                        return (String::new(), Vec::new(), None);
+                    };
+                    let current = match self.values.get(&key.name) {
+                        Some(Value::Scalar(number)) => Some(*number as i32),
+                        Some(Value::Array(run)) => run.first().copied(),
+                        None => None,
+                    };
+                    (key.name.clone(), choices_of(key), current)
+                }
+                // A segment holds more of the menu rather than a value, so it
+                // offers none.
+                Some(Row::Group { segment, .. }) => (segment.clone(), Vec::new(), None),
+                None => (String::new(), Vec::new(), None),
+            },
             Pane::Remap => {
                 let current = self.remap_text(self.remap_selected).parse::<i32>().ok();
                 let choices = self.remap_key().map(choices_of).unwrap_or_default();
@@ -394,7 +490,6 @@ impl App {
                 self.editing = Some(Editing {
                     target: Target::ProfileName(self.profile_selected),
                     text: entry.name.clone(),
-                    slot: 0,
                     fresh: false,
                 });
             }
@@ -406,19 +501,18 @@ impl App {
                 self.editing = Some(Editing {
                     target: Target::Remap(slot),
                     text: self.remap_text(slot),
-                    slot: 0,
                     fresh: true,
                 });
             }
             _ => {
-                let row = self.selected;
-                if row >= self.keys.len() {
+                // A domain's line has no value of its own: `open_selected`
+                // folds it before this is reached.
+                let Some(row) = self.selected_key() else {
                     return Ok(());
-                }
+                };
                 self.editing = Some(Editing {
                     target: Target::Key(row),
                     text: self.value_text(row),
-                    slot: 0,
                     fresh: true,
                 });
             }
@@ -426,58 +520,28 @@ impl App {
         Ok(())
     }
 
-    /// Writes a character into the element under the keys: the first one
-    /// replaces what the element held, and the rest extend it.
+    /// Writes a character into the value under the keys: the first one replaces
+    /// what it held, and the rest extend it.
     pub fn edit_push(&mut self, character: char) {
         let Some(editing) = self.editing.as_mut() else {
             return;
         };
         if editing.fresh {
-            editing.write_part(editing.slot, String::new());
+            editing.text.clear();
             editing.fresh = false;
         }
-        let mut part = editing.part();
-        part.push(character);
-        editing.write_part(editing.slot, part);
+        editing.text.push(character);
     }
 
     pub fn edit_pop(&mut self) {
         let Some(editing) = self.editing.as_mut() else {
             return;
         };
-        let mut part = editing.part();
-        part.pop();
-        editing.write_part(editing.slot, part);
+        editing.text.pop();
         editing.fresh = false;
     }
 
-    /// The elements the value being written has: a table's slots, or one.
-    pub fn edit_elements(&self) -> usize {
-        let Some(editing) = self.editing.as_ref() else {
-            return 1;
-        };
-        match editing.target {
-            Target::Key(row) if self.is_array(row) => {
-                (self.keys.get(row).map(|key| key.count).unwrap_or(0) as usize).max(1)
-            }
-            _ => 1,
-        }
-    }
-
-    /// Moves the keys to another element of a table, wrapping at its ends.
-    pub fn edit_slot(&mut self, by: i32) {
-        let count = self.edit_elements();
-        if count < 2 {
-            return;
-        }
-        let Some(editing) = self.editing.as_mut() else {
-            return;
-        };
-        editing.slot = (editing.slot as i32 + by).rem_euclid(count as i32) as usize;
-        editing.fresh = true;
-    }
-
-    /// Steps the element under the keys to the next value it may take: the one
+    /// Steps the value under the keys to the next one it may take: the one
     /// beside it in the schema's names, or the number one along its range.
     pub fn edit_step(&mut self, by: i32) {
         if !matches!(
@@ -491,11 +555,7 @@ impl App {
         let Some(editing) = self.editing.as_mut() else {
             return;
         };
-        let at = editing.slot;
-        let held = editing
-            .parts()
-            .get(at)
-            .and_then(|part| part.parse::<i32>().ok());
+        let held = editing.text.trim().parse::<i32>().ok();
 
         let next = if !choices.is_empty() {
             let position =
@@ -513,29 +573,8 @@ impl App {
         } else {
             return;
         };
-        editing.write_part(at, next.to_string());
+        editing.text = next.to_string();
         editing.fresh = true;
-    }
-
-    /// The text under the keys: one element of a table, or the whole value.
-    pub fn edit_text(&self) -> String {
-        self.editing
-            .as_ref()
-            .map(|editing| editing.part())
-            .unwrap_or_default()
-    }
-
-    /// The value the device holds at the element being edited.
-    pub fn edit_value(&self) -> Option<i32> {
-        let editing = self.editing.as_ref()?;
-        match editing.target {
-            Target::Key(row) => match self.values.get(&self.keys.get(row)?.name)? {
-                Value::Scalar(number) => Some(*number as i32),
-                Value::Array(run) => run.get(editing.slot).copied(),
-            },
-            Target::Remap(slot) => self.remap_values().get(slot).copied(),
-            Target::ProfileName(_) => None,
-        }
     }
 
     /// The range the number under the keys is held to, when its key declares
@@ -892,12 +931,7 @@ mod tests {
     fn a_value_is_typed_and_written_held_to_its_key() {
         let mut app = App::at(daemon_on_sim());
         app.refresh().expect("a state");
-        let row = app
-            .keys
-            .iter()
-            .position(|key| key.name == "led.bri")
-            .expect("the key the device declares");
-        app.selected = row;
+        select(&mut app, "led.bri");
         app.begin_edit().expect("an edit opens");
         app.editing.as_mut().expect("an edit").text = "200".into();
         app.commit_edit().expect("a value the key holds");
@@ -932,12 +966,7 @@ mod tests {
     fn a_saved_value_is_the_one_the_device_keeps() {
         let mut app = App::at(daemon_on_sim());
         app.refresh().expect("a state");
-        let row = app
-            .keys
-            .iter()
-            .position(|key| key.name == "led.bri")
-            .expect("the key the device declares");
-        app.selected = row;
+        select(&mut app, "led.bri");
         app.begin_edit().expect("an edit opens");
         app.editing.as_mut().expect("an edit").text = "77".into();
         app.commit_edit().expect("a value the key holds");
@@ -965,8 +994,8 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect();
         assert!(drawn.contains("BoringTechH743"), "the board is named");
-        assert!(drawn.contains("LED Brightness"), "the key is named readably");
-        assert!(drawn.contains("led.bri"), "the key's own name is shown beside it");
+        assert!(drawn.contains("▸ led"), "the menu opens on the keys' segments");
+        assert!(drawn.contains("4 keys"), "and says how many each holds");
     }
 
     #[test]
@@ -974,11 +1003,7 @@ mod tests {
         let mut app = App::at(daemon_on_sim());
         app.refresh().expect("a state");
         app.pane = Pane::Keys;
-        app.selected = app
-            .keys
-            .iter()
-            .position(|key| key.name == "usb.input_mode")
-            .expect("the key the device declares");
+        select(&mut app, "usb.input_mode");
 
         let (key, choices, current) = app.options();
         assert_eq!(key, "usb.input_mode");
@@ -1122,11 +1147,153 @@ mod tests {
             .expect("the key is declared")
     }
 
+    /// Puts the menu's focus on a key, by its row in the device's declaration:
+    /// the menu is walked down to the level the key sits on first.
+    fn select(app: &mut App, name: &str) {
+        let key = row_of(app, name);
+        let segments: Vec<String> = app.keys[key].name.split('.').map(str::to_string).collect();
+        app.path = segments[..segments.len() - 1].to_vec();
+        app.selected = app
+            .rows()
+            .iter()
+            .position(|line| *line == Row::Key(key))
+            .expect("the key is on the level the menu was walked to");
+    }
+
+    #[test]
+    fn the_options_open_on_the_paths_their_names_carry() {
+        let mut app = App::at(daemon_on_sim());
+        app.refresh().expect("a state");
+
+        let rows = app.rows();
+        assert_eq!(
+            rows,
+            vec![
+                Row::Group {
+                    segment: "map".into(),
+                    keys: 1
+                },
+                Row::Group {
+                    segment: "led".into(),
+                    keys: 4
+                },
+                Row::Group {
+                    segment: "usb".into(),
+                    keys: 1
+                },
+            ],
+            "the top of the menu is the first segment of every key's name, and a \
+             segment counts the keys anywhere below it"
+        );
+    }
+
+    #[test]
+    fn a_segment_is_gone_into_and_backed_out_of() {
+        let mut app = App::at(daemon_on_sim());
+        app.refresh().expect("a state");
+        app.selected = 1; // led
+
+        app.open_selected().expect("the level opens");
+        assert_eq!(app.path, vec!["led".to_string()]);
+        assert_eq!(app.selected, 0);
+        let rows = app.rows();
+        assert_eq!(
+            rows.iter()
+                .filter(|row| matches!(row, Row::Key(_)))
+                .count(),
+            3,
+            "the keys whose names end here are the level"
+        );
+        assert_eq!(
+            rows.last(),
+            Some(&Row::Group {
+                segment: "rgb".into(),
+                keys: 1
+            }),
+            "and the segment `led.rgb` keeps its place in the declaration"
+        );
+
+        // The deeper segment is the last line of the level.
+        app.selected = rows.len() - 1;
+        app.open_selected().expect("the deeper level opens");
+        assert_eq!(app.path, vec!["led".to_string(), "rgb".to_string()]);
+        assert_eq!(app.rows().len(), 1, "one key is left at this level");
+        assert_eq!(app.selected_key().map(|at| app.keys[at].name.as_str()), Some("led.rgb.hz"));
+
+        app.go_up().expect("back out one level");
+        assert_eq!(app.path, vec!["led".to_string()]);
+        assert_eq!(
+            app.focused_segment(),
+            Some(("rgb".to_string(), 1)),
+            "the focus lands on the segment that led in"
+        );
+
+        app.go_up().expect("back out to the top");
+        assert!(app.path.is_empty());
+        assert!(
+            !app.rows().iter().any(|row| matches!(row, Row::Key(_))),
+            "no key sits at the top of the menu"
+        );
+        assert!(app.go_up().is_ok(), "backing out of the top does nothing");
+    }
+
+    #[test]
+    fn a_key_is_edited_rather_than_gone_into() {
+        let mut app = App::at(daemon_on_sim());
+        app.refresh().expect("a state");
+        app.selected = 1;
+        app.open_selected().expect("led opens");
+        select(&mut app, "led.mode");
+
+        app.go_in().expect("right on a key");
+        assert_eq!(app.path, vec!["led".to_string()], "a key has no level below");
+        assert!(app.editing.is_none(), "and right does not edit it either");
+
+        app.open_selected().expect("enter on a key");
+        assert!(
+            matches!(
+                app.editing.as_ref().map(|editing| editing.target),
+                Some(Target::Key(_))
+            ),
+            "enter is what edits a key"
+        );
+    }
+
+    #[test]
+    fn the_screen_names_the_level_the_menu_is_on() {
+        let mut app = App::at(daemon_on_sim());
+        app.refresh().expect("a state");
+
+        let top = screen(&app);
+        assert!(top.contains("options (6)"), "the top is the whole menu");
+        assert!(top.contains("▸ led"), "a segment is marked as one");
+        assert!(
+            !top.contains("LED Mode"),
+            "and the keys inside it are not on the top level"
+        );
+        // The column describes the line in focus, which is the first segment.
+        assert!(
+            top.contains("1 key · enter goes in"),
+            "the column says the way in"
+        );
+
+        app.selected = 1;
+        app.open_selected().expect("led opens");
+        let inside = screen(&app);
+        assert!(
+            inside.contains("options › led"),
+            "the title carries the path: {}",
+            inside.lines().take(3).collect::<Vec<_>>().join(" / ")
+        );
+        assert!(inside.contains("LED Mode"));
+        assert!(inside.contains("▸ rgb"), "a deeper segment is offered too");
+    }
+
     #[test]
     fn an_effect_is_offered_by_the_name_the_schema_gives_it() {
         let mut app = App::at(daemon_on_sim());
         app.refresh().expect("a state");
-        app.selected = row_of(&app, "led.mode");
+        select(&mut app, "led.mode");
 
         let (_, choices, current) = app.options();
         assert_eq!(current, Some(1), "the simulated strip runs the rainbow");
@@ -1139,21 +1306,19 @@ mod tests {
     }
 
     #[test]
-    fn the_button_a_value_goes_into_is_set_apart_in_its_own_colour() {
+    fn a_key_is_edited_from_the_level_it_sits_on() {
         let mut app = App::at(daemon_on_sim());
         app.refresh().expect("a state");
-        app.selected = row_of(&app, "map.btn_map");
-        app.begin_edit().expect("the table is editable");
-        app.edit_slot(4);
+        select(&mut app, "led.mode");
 
+        app.begin_edit().expect("the key is editable");
         assert!(
-            screen(&app).contains("button 5 of 8"),
-            "the button of the table is named"
+            screen(&app).contains("edit · led.mode"),
+            "the box names the key it holds"
         );
-        assert_eq!(
-            colour_of(&app, "button 5 of 8"),
-            Some(crate::ui::HIGHLIGHT),
-            "and read in the colour kept for what is checked before typing"
+        assert!(
+            screen(&app).contains("LEDMode"),
+            "and the enum its value is drawn from"
         );
     }
 
@@ -1183,47 +1348,29 @@ mod tests {
         app.pane = Pane::Remap;
         app.begin_edit().expect("a slot to edit");
 
-        let opening = app.edit_text();
+        let text = |app: &App| app.editing.as_ref().map(|editing| editing.text.clone());
+        let opening = text(&app);
         app.edit_step(1);
-        assert_ne!(app.edit_text(), opening, "a key steps the value");
+        assert_ne!(text(&app), opening, "a key steps the value");
         app.edit_step(-1);
-        assert_eq!(app.edit_text(), opening, "and steps it back");
+        assert_eq!(text(&app), opening, "and steps it back");
     }
 
     #[test]
-    fn the_sideways_keys_walk_a_table_slot_by_slot() {
+    fn a_typed_digit_replaces_the_value_it_opens_on() {
         let mut app = App::at(daemon_on_sim());
         app.refresh().expect("a state");
-        app.selected = row_of(&app, "map.btn_map");
-        app.begin_edit().expect("the table is editable");
-
-        assert_eq!(app.edit_text(), "1", "the first slot is under the keys");
-        app.edit_slot(1);
-        assert_eq!(app.edit_text(), "2", "the next one carries its own value");
-        app.edit_slot(-1);
-        assert_eq!(app.edit_text(), "1");
-    }
-
-    #[test]
-    fn a_typed_digit_replaces_the_element_it_opens_on() {
-        let mut app = App::at(daemon_on_sim());
-        app.refresh().expect("a state");
-        app.selected = row_of(&app, "map.btn_map");
-        app.begin_edit().expect("the table is editable");
-        app.edit_slot(1);
+        select(&mut app, "led.bri");
+        app.begin_edit().expect("the key is editable");
         app.edit_push('9');
 
         assert_eq!(
-            app.edit_text(),
-            "9",
+            app.editing.as_ref().map(|editing| editing.text.as_str()),
+            Some("9"),
             "the first digit is the value, not a digit appended to it"
         );
-        app.commit_edit().expect("the table is written");
-        assert_eq!(
-            app.values.get("map.btn_map"),
-            Some(&Value::Array(vec![1, 9, 3, 4, 5, 6, 7, 8])),
-            "one slot moved and the rest stood still"
-        );
+        app.commit_edit().expect("the value is written");
+        assert_eq!(app.values.get("led.bri"), Some(&Value::Scalar(9)));
     }
 
     /// The screen as a terminal holds it: the cells, with what each is drawn in.
