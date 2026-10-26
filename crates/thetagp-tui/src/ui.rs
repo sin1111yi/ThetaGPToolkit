@@ -30,7 +30,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
 fn draw_body(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let mut constraints = vec![
-        Constraint::Length(3), // header
+        Constraint::Length(4), // header
         Constraint::Length(4), // sources
         Constraint::Min(9),    // keys
     ];
@@ -60,20 +60,41 @@ fn draw_body(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
 fn draw_header(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let named = match &app.identity {
-        Some(named) => format!(
-            "{} · {} · {} {}",
-            named.board, named.version, named.build_date, named.build_time
-        ),
+        // The time of the build is the device's too, and the date is what tells
+        // one build from another at a glance: the hour is left to the tools.
+        Some(named) => format!("{} · {} · {}", named.board, named.version, named.build_date),
         None => "no device".to_string(),
     };
     let source = app.connected.as_deref().unwrap_or("disconnected");
-    let line = Line::from(vec![
-        Span::styled(" ThetaGP ", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-        Span::styled(format!(" {named} "), Style::default().fg(MUTED)),
-        Span::styled(format!(" [{source}]"), Style::default().fg(Color::White)),
-    ]);
+
+    // The profile a change is written into when it is saved: the one the device
+    // runs from, named as its body carries it.
+    let editing = app
+        .profiles
+        .iter()
+        .find(|entry| entry.active)
+        .map(|entry| {
+            let name = if entry.name.is_empty() {
+                String::new()
+            } else {
+                format!(" \"{}\"", entry.name)
+            };
+            format!("editing #{}", entry.id) + &name
+        })
+        .unwrap_or_else(|| "no profile".to_string());
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled(" ThetaGP ", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled(format!(" {named}"), Style::default().fg(MUTED)),
+        ]),
+        Line::from(vec![
+            Span::styled(format!(" [{source}]"), Style::default()),
+            Span::styled(format!("  {editing}"), Style::default().fg(ACCENT)),
+        ]),
+    ];
     frame.render_widget(
-        Paragraph::new(line).block(Block::default().borders(Borders::ALL)),
+        Paragraph::new(lines).block(Block::default().borders(Borders::ALL)),
         area,
     );
 }
