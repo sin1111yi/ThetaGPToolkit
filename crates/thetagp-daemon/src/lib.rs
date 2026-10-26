@@ -424,6 +424,9 @@ fn ask_the_ports() -> Result<String, String> {
 pub fn serve(listener: TcpListener, token: String, service: std::sync::Arc<Service>) {
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
+        // The reply is written as soon as it is built: a socket that waited for
+        // the peer's delayed ack would add its 40 ms to every exchange.
+        stream.set_nodelay(true).ok();
         let service = std::sync::Arc::clone(&service);
         let token = token.clone();
         std::thread::spawn(move || serve_connection(stream, token, service));

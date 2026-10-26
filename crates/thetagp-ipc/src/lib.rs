@@ -85,6 +85,13 @@ impl Client {
         stream
             .set_read_timeout(Some(Duration::from_secs(30)))
             .map_err(|error| error.to_string())?;
+        // A request is a few hundred bytes and its reply follows at once: with
+        // Nagle on, the second of two small writes waits for the peer's delayed
+        // ack, which is 40 ms on a loopback socket -- twenty times the wire's
+        // own round trip.
+        stream
+            .set_nodelay(true)
+            .map_err(|error| error.to_string())?;
         let reader = BufReader::new(stream.try_clone().map_err(|error| error.to_string())?);
         let mut client = Client { reader, writer: stream, next_id: 1 };
         client.call("daemon.hello", json!({ "token": endpoint.token }))?;
