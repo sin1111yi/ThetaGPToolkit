@@ -14,8 +14,8 @@ use thetagp_client::KeyType;
 use crate::app::{App, Pane, Prompt, Target};
 use crate::labels;
 
-const ACCENT: Color = Color::Rgb(90, 156, 255);
-const MUTED: Color = Color::Rgb(139, 146, 156);
+pub(crate) const ACCENT: Color = Color::Rgb(90, 156, 255);
+pub(crate) const MUTED: Color = Color::Rgb(139, 146, 156);
 // What a reader checks before acting -- the button a value goes into, the profile
 // a change lands in -- is set apart from the blue of what is being written.
 pub(crate) const HIGHLIGHT: Color = Color::Rgb(232, 176, 96);
@@ -210,17 +210,11 @@ fn draw_edit(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     }
 
     let footer = if choices.is_empty() {
-        "  enter write · esc cancel"
+        keys_line(&[("enter", "write"), ("esc", "cancel")])
     } else {
-        "  ↑↓ value · enter write · esc cancel"
+        keys_line(&[("↑↓", "value"), ("enter", "write"), ("esc", "cancel")])
     };
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            footer,
-            Style::default().fg(MUTED),
-        ))),
-        rows[2],
-    );
+    frame.render_widget(Paragraph::new(footer), rows[2]);
 }
 
 /// The colour at a hue, on the wheel the strip draws: six sectors of sixty
@@ -333,10 +327,7 @@ fn draw_scale_box(
         Line::from(""),
         Line::from(cells_line),
         Line::from(mark),
-        Line::from(Span::styled(
-            "  ←→ value · enter write · esc cancel",
-            Style::default().fg(MUTED),
-        )),
+        keys_line(&[("←→", "value"), ("enter", "write"), ("esc", "cancel")]),
     ];
     frame.render_widget(Paragraph::new(lines), inner);
 }
@@ -347,6 +338,26 @@ fn menu_title(app: &App) -> String {
         return format!(" options ({}) ", app.menu_count());
     }
     format!(" options › {} ", app.path.join(" › "))
+}
+
+/// A run of keys and what each does: the key in the colour of something to
+/// press, the words beside it grey, so the two are told apart at a glance.
+fn keys_line(pairs: &[(&str, &str)]) -> Line<'static> {
+    let mut spans = vec![Span::raw("  ")];
+    for (at, (key, action)) in pairs.iter().enumerate() {
+        if at > 0 {
+            spans.push(Span::styled(" · ", Style::default().fg(Color::DarkGray)));
+        }
+        spans.push(Span::styled(
+            (*key).to_string(),
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            format!(" {action}"),
+            Style::default().fg(MUTED),
+        ));
+    }
+    Line::from(spans)
 }
 
 /// How many keys a segment holds, in words: a segment of one is not a segment
@@ -402,10 +413,7 @@ fn draw_prompt(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                         Style::default().fg(MUTED),
                     )),
                     Line::from(""),
-                    Line::from(Span::styled(
-                        "  enter delete · esc cancel",
-                        Style::default().fg(MUTED),
-                    )),
+                    keys_line(&[("enter", "delete"), ("esc", "cancel")]),
                 ],
             )
         }
@@ -428,10 +436,7 @@ fn draw_prompt(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                         Style::default().fg(HIGHLIGHT),
                     )),
                     Line::from(""),
-                    Line::from(Span::styled(
-                        "  s save · d discard · esc cancel",
-                        Style::default().fg(MUTED),
-                    )),
+                    keys_line(&[("s", "save"), ("d", "discard"), ("esc", "cancel")]),
                 ],
             )
         }
@@ -830,17 +835,25 @@ fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         // window's own blue, and a failure in red.
         None => Span::styled(format!(" {}", app.message), Style::default().fg(ACCENT)),
     };
-    // The keys are a line a reader scans, and the whole of them is wider than a
-    // terminal: they are written on two.
+    // A line of keys: the key in the colour of something to press, the words
+    // beside it grey, so a reader scans the keys and not the prose.
     let help = vec![
-        Line::from(Span::styled(
-            "  tab pane · ←→ out of / into a level · enter connect / open / edit / activate · x delete",
-            Style::default(),
-        )),
-        Line::from(Span::styled(
-            "  n new profile · e name it · w save · l load · t snapshot · r restore · d disconnect · q quit",
-            Style::default(),
-        )),
+        keys_line(&[
+            ("tab", "pane"),
+            ("←→", "out of / into a level"),
+            ("enter", "connect / open / edit / activate"),
+            ("x", "delete"),
+        ]),
+        keys_line(&[
+            ("n", "new profile"),
+            ("e", "name it"),
+            ("w", "save"),
+            ("l", "load"),
+            ("t", "snapshot"),
+            ("r", "restore"),
+            ("d", "disconnect"),
+            ("q", "quit"),
+        ]),
     ];
     let mut lines = vec![Line::from(message)];
     lines.extend(help);

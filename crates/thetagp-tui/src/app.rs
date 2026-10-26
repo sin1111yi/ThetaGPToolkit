@@ -1421,6 +1421,32 @@ mod tests {
     }
 
     #[test]
+    fn a_key_is_drawn_apart_from_what_it_does() {
+        let mut app = App::at(daemon_on_sim());
+        app.refreshed().expect("a state");
+        let buffer = buffer_of(&app);
+
+        for y in 0..buffer.area.height {
+            let line = row_text(&buffer, y);
+            let Some(at) = line.find("n new profile") else {
+                continue;
+            };
+            assert_eq!(
+                buffer[(at as u16, y)].fg,
+                crate::ui::ACCENT,
+                "the key is drawn as a key"
+            );
+            assert_eq!(
+                buffer[(at as u16 + 2, y)].fg,
+                crate::ui::MUTED,
+                "and the words beside it as what it does"
+            );
+            return;
+        }
+        panic!("no help line carries `n new profile`");
+    }
+
+    #[test]
     fn the_log_is_the_lines_the_device_wrote() {
         let mut app = App::at(daemon_on_sim());
         app.refreshed().expect("a state");
