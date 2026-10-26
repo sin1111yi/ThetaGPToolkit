@@ -14,7 +14,7 @@ fn the_key_space_is_the_device_own_declaration() {
     let mut session = session();
     let space = session.key_space().unwrap();
 
-    assert_eq!(space.len(), 5);
+    assert_eq!(space.len(), 7);
     assert_eq!(space.domains(), vec!["map", "led", "led.rgb", "usb"]);
     assert_eq!(space.domain("map").len(), 2);
 
@@ -27,6 +27,13 @@ fn the_key_space_is_the_device_own_declaration() {
 
     assert!(space.get("usb.input_mode").unwrap().reboot);
     assert_eq!(space.get("map.btn_map").unwrap().count, 8);
+
+    // An effect is chosen by the name its number stands for, and a hue is the
+    // one key the device declares wider than a byte.
+    let effect = space.get("led.mode").unwrap();
+    assert_eq!(effect.value_enum.as_deref(), Some("LEDMode"));
+    assert_eq!((effect.min, effect.max), (0, 2));
+    assert_eq!(space.get("led.hue").unwrap().kind, KeyType::U16);
 }
 
 #[test]
@@ -34,7 +41,7 @@ fn the_configuration_is_read_one_key_at_a_time() {
     let mut session = session();
     let config = Config::read(&mut session).unwrap();
 
-    assert_eq!(config.values().len(), 5);
+    assert_eq!(config.values().len(), 7);
     assert_eq!(config.get("led.bri"), Some(&Value::Scalar(128)));
     assert_eq!(
         config.get("map.btn_map"),

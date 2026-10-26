@@ -148,7 +148,7 @@ fn a_snapshot_goes_out_and_back_in() {
     assert!(taken.contains("BoringTechH743"), "{taken}");
 
     let restored = text_of(&mut session, "restore", json!({ "snapshot": taken }));
-    assert!(restored.contains("\"values_written\": 5"), "{restored}");
+    assert!(restored.contains("\"values_written\": 7"), "{restored}");
 }
 
 #[test]

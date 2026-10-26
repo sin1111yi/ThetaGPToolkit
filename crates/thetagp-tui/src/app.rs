@@ -1123,6 +1123,22 @@ mod tests {
     }
 
     #[test]
+    fn an_effect_is_offered_by_the_name_the_schema_gives_it() {
+        let mut app = App::at(daemon_on_sim());
+        app.refresh().expect("a state");
+        app.selected = row_of(&app, "led.mode");
+
+        let (_, choices, current) = app.options();
+        assert_eq!(current, Some(1), "the simulated strip runs the rainbow");
+        let names: Vec<&str> = choices.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["Off", "Rainbow", "Solid"],
+            "every effect the schema names is offered"
+        );
+    }
+
+    #[test]
     fn the_button_a_value_goes_into_is_set_apart_in_its_own_colour() {
         let mut app = App::at(daemon_on_sim());
         app.refresh().expect("a state");
