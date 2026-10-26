@@ -15,11 +15,12 @@ use crate::app::{App, Pane, Prompt, Target};
 use crate::labels;
 
 // The palette, one meaning each: blue is what is being written, amber is what a
-// reader checks before acting, green is the key to press, grey is what is only
-// there to be read.
+// reader checks before acting, mint is the key to press, grey is what is only
+// there to be read. The three colours sit in a soft triad, each a shade off the
+// terminal's own hues so none of them shouts over the text they mark.
 pub(crate) const ACCENT: Color = Color::Rgb(90, 156, 255);
 pub(crate) const HIGHLIGHT: Color = Color::Rgb(232, 176, 96);
-pub(crate) const KEY: Color = Color::Rgb(126, 200, 140);
+pub(crate) const KEY: Color = Color::Rgb(122, 208, 180);
 pub(crate) const MUTED: Color = Color::Rgb(139, 146, 156);
 
 pub fn draw(frame: &mut Frame, app: &App) {
