@@ -134,20 +134,55 @@ fn draw_input(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         })
         .unwrap_or_default();
 
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled("held  ", Style::default().fg(MUTED)),
-            Span::styled(
-                if keys.is_empty() {
-                    "no key".to_string()
-                } else {
-                    keys.join("  ")
-                },
-                Style::default().fg(if keys.is_empty() { MUTED } else { KEY }),
-            ),
-        ]),
-        Line::from(""),
-    ];
+    let mut lines = vec![Line::from(vec![
+        Span::styled("held  ", Style::default().fg(MUTED)),
+        Span::styled(
+            if keys.is_empty() {
+                "no key".to_string()
+            } else {
+                keys.join("  ")
+            },
+            Style::default().fg(if keys.is_empty() { MUTED } else { KEY }),
+        ),
+    ])];
+
+    // The buttons a report can carry, as a pad's face: one lit for each the host
+    // reads as held, so a press is found by the button it is rather than by the
+    // order its name came in.
+    let held_buttons: Vec<u32> = state
+        .get("keys")
+        .and_then(|keys| keys.as_array())
+        .map(|keys| {
+            keys.iter()
+                .filter_map(|key| key.get("code").and_then(|code| code.as_u64()))
+                .filter_map(|code| thetagp_client::input::pad_button_index(code as u16))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut row: Vec<Span> = Vec::new();
+    let mut cells = 0;
+    for index in 0..32i32 {
+        let Some(name) = labels::button(index) else {
+            continue;
+        };
+        let lit = held_buttons.contains(&(index as u32));
+        let style = if lit {
+            Style::default().fg(KEY).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(MUTED)
+        };
+        row.push(Span::styled(format!("{name:<5}"), style));
+        row.push(Span::raw(" "));
+        cells += 1;
+        if cells % 12 == 0 {
+            lines.push(Line::from(std::mem::take(&mut row)));
+        }
+    }
+    if !row.is_empty() {
+        lines.push(Line::from(row));
+    }
+    lines.push(Line::from(""));
 
     if let Some(axes) = state.get("axes").and_then(|v| v.as_array()) {
         for axis in axes {

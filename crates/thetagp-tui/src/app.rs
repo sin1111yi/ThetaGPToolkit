@@ -1492,6 +1492,19 @@ mod tests {
             }
         }
         assert!(lit, "the slot feeding the held button is lit");
+
+        // And the button's own cell on the device's side carries the press.
+        let mut cell_lit = false;
+        for y in 0..buffer.area.height {
+            let text = row_text(&buffer, y);
+            let Some(at) = text.find("DOWN") else {
+                continue;
+            };
+            if buffer[(at as u16, y)].fg == crate::ui::KEY {
+                cell_lit = true;
+            }
+        }
+        assert!(cell_lit, "the button the press names is lit on the left");
     }
 
     #[test]
