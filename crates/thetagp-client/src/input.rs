@@ -80,6 +80,17 @@ pub fn key_name(code: u16) -> Option<&'static str> {
     Some(name)
 }
 
+/// The button index a key code stands for on a gamepad, as the host numbers the
+/// buttons a report carries: the fifteen the kernel names, then the trigger-happy
+/// run the rest of a pad's buttons land in.
+pub fn button_index(code: u16) -> Option<u32> {
+    match code {
+        0x130..=0x13e => Some(u32::from(code - 0x130)),
+        0x2c0..=0x2df => Some(u32::from(code - 0x2c0) + 15),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,6 +119,11 @@ mod tests {
         assert_eq!(axis_name(0x00), Some("X"));
         assert_eq!(axis_name(0x10), Some("Hat X"));
         assert_eq!(key_name(0x130), Some("South"));
+        assert_eq!(button_index(0x130), Some(0));
+        assert_eq!(button_index(0x13e), Some(14));
+        assert_eq!(button_index(0x2c0), Some(15));
+        assert_eq!(button_index(0x2cf), Some(30));
+        assert_eq!(button_index(0x123), None);
         assert_eq!(axis_name(0x3f), None);
         assert_eq!(key_name(0x2ff), None);
     }

@@ -359,6 +359,14 @@ impl App {
     }
 
     /// The text a value is edited in: a number, or a run of them.
+    /// The input mode the device reports as, as `usb.input_mode` holds it.
+    pub fn input_mode(&self) -> Option<i32> {
+        match self.values.get("usb.input_mode") {
+            Some(Value::Scalar(mode)) => Some(*mode as i32),
+            _ => None,
+        }
+    }
+
     pub fn value_text(&self, row: usize) -> String {
         let Some(key) = self.keys.get(row) else {
             return String::new();
@@ -1456,6 +1464,34 @@ mod tests {
             Some(&ratatui::style::Color::Rgb(0, 255, 255)),
             "and full saturation is the hue the profile carries"
         );
+    }
+
+    #[test]
+    fn a_pressed_button_lights_the_input_it_is_wired_to() {
+        let mut app = App::at(daemon_on_sim());
+        app.refreshed().expect("a state");
+        app.show_input = true;
+        // East is button 1, and the simulated board's first input feeds it.
+        app.input = Some(json!({
+            "available": true,
+            "name": "a pad",
+            "keys": [{ "code": 0x131, "name": "East" }],
+            "axes": [],
+        }));
+        let buffer = buffer_of(&app);
+
+        let mut lit = false;
+        for y in 0..buffer.area.height {
+            if !row_text(&buffer, y).contains("input 00") {
+                continue;
+            }
+            for x in 0..buffer.area.width {
+                if buffer[(x, y)].fg == crate::ui::HIGHLIGHT {
+                    lit = true;
+                }
+            }
+        }
+        assert!(lit, "the slot feeding the held button is lit");
     }
 
     #[test]

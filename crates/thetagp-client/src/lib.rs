@@ -21,7 +21,7 @@ pub mod transport;
 pub use backup::{Restored, Snapshot};
 pub use config::Config;
 pub use dynamic::{Arm, DynamicError};
-pub use input::{axis_name, key_name, Axis, Reading};
+pub use input::{axis_name, button_index, key_name, Axis, Reading};
 pub use keys::{Key, KeySpace, KeyType, Reject, Value};
 pub use session::{Sequence, Session, SessionError};
 pub use transport::{SerialTransport, Transport};

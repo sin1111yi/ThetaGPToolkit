@@ -810,15 +810,42 @@ fn draw_remap(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .border_style(Style::default().fg(border))
         .title(" remap (map.btn_map → button index) ");
 
+    // The buttons the host reads as held this turn, so a slot feeding one of
+    // them is lit: a press is checked against the input it is wired to. The
+    // numbering is the generic pad's, which is the one this firmware's buttons
+    // travel as; a console mode numbers its buttons its own way, and a wrong
+    // light is worse than none.
+    let held: Vec<i32> = if app.input_mode() != Some(14) {
+        Vec::new()
+    } else {
+        app
+        .input
+        .as_ref()
+        .and_then(|state| state.get("keys"))
+        .and_then(|keys| keys.as_array())
+        .map(|keys| {
+            keys.iter()
+                .filter_map(|key| key.get("code").and_then(|code| code.as_u64()))
+                .filter_map(|code| thetagp_client::input::button_index(code as u16))
+                .map(|index| index as i32)
+                .collect()
+        })
+        .unwrap_or_default()
+    };
+
     let slots = app.remap_len();
     let rows: Vec<Row> = (0..slots)
         .map(|index| {
             // The slot is the board's own input index, as its key map numbers
             // it; the button it feeds is named from the schema's table.
-            let from = Line::from(Span::styled(
-                format!("input {index:02}"),
-                Style::default().fg(MUTED),
-            ));
+            let target = app.remap_text(index).parse::<i32>().unwrap_or(0);
+            let lit = held.contains(&target);
+            let from_style = if lit {
+                Style::default().fg(HIGHLIGHT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(MUTED)
+            };
+            let from = Line::from(Span::styled(format!("input {index:02}"), from_style));
             let shown = match &app.editing {
                 Some(editing) if editing.target == Target::Remap(index) => {
                     Line::from(format!("{}▏", editing.text))
@@ -829,7 +856,11 @@ fn draw_remap(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             };
             Row::new(vec![
                 Cell::from(from),
-                Cell::from("→").style(Style::default().fg(MUTED)),
+                Cell::from("→").style(if lit {
+                    Style::default().fg(HIGHLIGHT)
+                } else {
+                    Style::default().fg(MUTED)
+                }),
                 Cell::from(shown),
             ])
         })
