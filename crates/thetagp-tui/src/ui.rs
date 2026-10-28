@@ -200,7 +200,9 @@ fn draw_input(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 Span::styled(format!("{name:<9} "), Style::default().fg(MUTED)),
                 Span::styled(bar, Style::default().fg(ACCENT)),
                 Span::styled(
-                    format!(" {value:>6}  {position:>4}‰"),
+                    // The value the axis reads, and how far along its range
+                    // that is: the bar counts to a hundred, not to a thousand.
+                    format!(" {value:>6}  {:>3}%", position / 10),
                     Style::default().fg(MUTED),
                 ),
             ]));
