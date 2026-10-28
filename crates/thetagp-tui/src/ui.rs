@@ -41,8 +41,16 @@ pub fn draw(frame: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([Constraint::Ratio(1, 3), Constraint::Ratio(2, 3)])
         .split(columns[1]);
-    draw_body(frame, app, columns[0]);
-    draw_about(frame, app, aside[0]);
+    if app.show_input {
+        // The live view takes the whole of the device's side, and the remap
+        // table moves to the column beside it: what the inputs are wired to is
+        // what a reader checks a press against.
+        draw_input(frame, app, columns[0]);
+        draw_remap(frame, app, aside[0]);
+    } else {
+        draw_body(frame, app, columns[0]);
+        draw_about(frame, app, aside[0]);
+    }
     draw_log(frame, app, aside[1]);
     draw_status(frame, app, rows[1]);
     // A box sits over the device alone: what it is writing is read against the
@@ -77,13 +85,7 @@ fn draw_body(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     draw_header(frame, app, areas[0]);
     draw_sources(frame, app, areas[1]);
-    // The live view takes the room the key table has: it is the same table's
-    // subject, what the device is doing rather than what it is set to.
-    if app.show_input {
-        draw_input(frame, app, areas[2]);
-    } else {
-        draw_keys(frame, app, areas[2]);
-    }
+    draw_keys(frame, app, areas[2]);
     let mut at = 3;
     if has_remap {
         draw_remap(frame, app, areas[at]);
@@ -152,9 +154,11 @@ fn draw_input(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             let name = axis.get("name").and_then(|v| v.as_str()).unwrap_or("?");
             let position = axis.get("position").and_then(|v| v.as_i64()).unwrap_or(0);
             let value = axis.get("value").and_then(|v| v.as_i64()).unwrap_or(0);
-            // Twenty columns of travel, and where the axis stands along them.
-            let filled = ((position.clamp(0, 1000) * 20) / 1000) as usize;
-            let bar: String = (0..20)
+            // The travel the axis is drawn against, as wide as the pane
+            // leaves beside its name and its numbers.
+            let travel = (inner.width as i32 - 30).clamp(10, 80) as usize;
+            let filled = ((position.clamp(0, 1000) * travel as i64) / 1000) as usize;
+            let bar: String = (0..travel)
                 .map(|at| if at < filled { '=' } else { '.' })
                 .collect();
             lines.push(Line::from(vec![

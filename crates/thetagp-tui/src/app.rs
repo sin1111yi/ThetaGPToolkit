@@ -1482,6 +1482,10 @@ mod tests {
         assert!(text.contains("South"), "each held key by its name");
         assert!(text.contains("X "), "and every axis the node carries");
         assert!(text.contains("501"), "with where it stands along its range");
+        assert!(
+            text.contains("remap (map.btn_map"),
+            "and the remap table beside it, where the info column was"
+        );
     }
 
     #[test]
