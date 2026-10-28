@@ -8,6 +8,8 @@
 //! the same calls the MCP server carries over stdio — and `session/*`, the typed
 //! one the window reads, which hands back the values rather than their text.
 
+mod input;
+
 use std::net::TcpListener;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -178,6 +180,42 @@ impl Service {
                 let space = session.key_space().map_err(|error| error.to_string())?;
                 Ok(json!({ "inputs": space.inputs() }))
             }),
+            "session.input" => match self.session.lock() {
+                Err(_) => Err(("the device is in an unusable state".to_string(), -32603)),
+                Ok(held) => match held.as_ref() {
+                    None => Err(("nothing is connected".to_string(), -32002)),
+                    // The state the host's own driver holds, read through the
+                    // kernel: what a game sees, and nothing the device has to be
+                    // asked for.
+                    Some(open) => match input::read(&open.source) {
+                        Err(reason) => Ok(json!({ "available": false, "reason": reason })),
+                        Ok(reading) => Ok(json!({
+                            "available": true,
+                            "name": reading.name,
+                            "keys": reading
+                                .keys
+                                .iter()
+                                .map(|code| json!({
+                                    "code": code,
+                                    "name": thetagp_client::input::key_name(*code),
+                                }))
+                                .collect::<Vec<_>>(),
+                            "axes": reading
+                                .axes
+                                .iter()
+                                .map(|axis| json!({
+                                    "code": axis.code,
+                                    "name": thetagp_client::input::axis_name(axis.code),
+                                    "value": axis.value,
+                                    "min": axis.min,
+                                    "max": axis.max,
+                                    "position": axis.position(),
+                                }))
+                                .collect::<Vec<_>>(),
+                        })),
+                    },
+                },
+            },
             "session.profiles" => self.with(|session| {
                 let listed = session.profiles().map_err(|error| error.to_string())?;
                 let profiles: Vec<Json> = listed

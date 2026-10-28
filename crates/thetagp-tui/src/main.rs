@@ -39,10 +39,17 @@ fn main() -> io::Result<()> {
         }
     }
 
+    // The live input view, opened before the first frame: a machine checking a
+    // board's buttons and axes reads them without touching the screen.
+    if std::env::args().any(|argument| argument == "--input") {
+        app.show_input = true;
+    }
+
     // A frame drawn and written as text: what the screen holds, without a
     // terminal to hold it -- for a log, a test or a machine with no display.
     if std::env::args().any(|argument| argument == "--frame") {
         app.poll_log().ok();
+        app.poll_input().ok();
         return print_frame(&app);
     }
 
@@ -97,8 +104,13 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
         // The device logs as it runs, not only when a key is pressed: the log
         // is read once per turn, and the frame after it shows what it said.
         app.poll_log().ok();
+        // The live view is drawn from what the driver holds this turn, so the
+        // turn is short while it is open: a quarter second between readings
+        // would show a press long after it happened.
+        app.poll_input().ok();
         terminal.draw(|frame| ui::draw(frame, app))?;
-        if event::poll(Duration::from_millis(250))? {
+        let wait = if app.show_input { 40 } else { 250 };
+        if event::poll(Duration::from_millis(wait))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press && handle(app, key.code) {
                     return Ok(());
@@ -147,6 +159,14 @@ fn handle(app: &mut App, code: KeyCode) -> bool {
     }
 
     match code {
+        // The live view of what the host reads: the keys held and where the
+        // axes stand, read from the driver beside the command channel.
+        KeyCode::Char('i') => {
+            app.show_input = !app.show_input;
+            if !app.show_input {
+                app.input = None;
+            }
+        }
         // Nothing a save would carry is left behind, so `q` is the answer; a
         // change that is only on the device is put to the reader first.
         KeyCode::Char('q') => {

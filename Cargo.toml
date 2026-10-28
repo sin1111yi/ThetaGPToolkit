@@ -19,6 +19,7 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 clap = { version = "4", features = ["derive", "env"] }
+libc = "0.2"
 prost = "0.14"
 prost-reflect = "0.16"
 serde = { version = "1", features = ["derive"] }

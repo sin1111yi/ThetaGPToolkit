@@ -42,6 +42,11 @@ again under them.
   take scrolling under it; a hue and a saturation are edited on the band they
   belong to, drawn from the rest of the colour the profile carries. `--frame`
   renders one screen as text, for a log or a machine with no display.
+- A live view of the input itself, on `i` or `--input`: the keys the host reads
+  as held and every axis the device carries, with where it stands along its
+  range. It is the state the host's own driver holds -- the bytes a game binds
+  to -- read through the kernel, so nothing is asked of the firmware and no
+  command channel is shared with it.
 - Beside the device: a column saying what the line in focus is for, and under it
   the **firmware's own log**, read over the protocol -- the lines the device
   kept in its ring, with the level each was written at.

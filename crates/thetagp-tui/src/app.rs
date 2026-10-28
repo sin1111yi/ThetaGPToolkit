@@ -142,6 +142,9 @@ pub struct App {
 
     pub snapshot: Option<String>,
     pub pane: Pane,
+    /// Whether the live input view is shown, and what it last read.
+    pub show_input: bool,
+    pub input: Option<Json>,
     pub message: String,
     pub error: Option<String>,
 }
@@ -170,6 +173,8 @@ impl App {
             prompt: None,
             snapshot: None,
             pane: Pane::Keys,
+            show_input: false,
+            input: None,
             message: String::new(),
             error: None,
         }
@@ -794,6 +799,15 @@ impl App {
     /// Reads the lines the firmware has logged since the screen last asked, and
     /// keeps them. A read that fails is not a line of the device's log, so it is
     /// left to the status line.
+    /// Reads the input the host's own driver holds, through the daemon.
+    pub fn poll_input(&mut self) -> Result<(), String> {
+        if self.client.is_none() || !self.show_input {
+            return Ok(());
+        }
+        self.input = Some(self.call("session.input", json!({}))?);
+        Ok(())
+    }
+
     pub fn poll_log(&mut self) -> Result<(), String> {
         if self.client.is_none() {
             return Ok(());
@@ -1442,6 +1456,32 @@ mod tests {
             Some(&ratatui::style::Color::Rgb(0, 255, 255)),
             "and full saturation is the hue the profile carries"
         );
+    }
+
+    #[test]
+    fn the_input_view_shows_what_the_driver_holds() {
+        let mut app = App::at(daemon_on_sim());
+        app.refreshed().expect("a state");
+        app.show_input = true;
+        app.input = Some(json!({
+            "available": true,
+            "name": "a pad",
+            "keys": [{ "code": 0x130, "name": "South" }],
+            "axes": [
+                { "code": 0, "name": "X", "value": 128, "min": 0, "max": 255, "position": 501 }
+            ],
+        }));
+        let buffer = buffer_of(&app);
+
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            text.push_str(&row_text(&buffer, y));
+            text.push('\n');
+        }
+        assert!(text.contains("held"), "the keys the driver holds are named");
+        assert!(text.contains("South"), "each held key by its name");
+        assert!(text.contains("X "), "and every axis the node carries");
+        assert!(text.contains("501"), "with where it stands along its range");
     }
 
     #[test]

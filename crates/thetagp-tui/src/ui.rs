@@ -77,13 +77,98 @@ fn draw_body(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     draw_header(frame, app, areas[0]);
     draw_sources(frame, app, areas[1]);
-    draw_keys(frame, app, areas[2]);
+    // The live view takes the room the key table has: it is the same table's
+    // subject, what the device is doing rather than what it is set to.
+    if app.show_input {
+        draw_input(frame, app, areas[2]);
+    } else {
+        draw_keys(frame, app, areas[2]);
+    }
     let mut at = 3;
     if has_remap {
         draw_remap(frame, app, areas[at]);
         at += 1;
     }
     draw_profiles(frame, app, areas[at]);
+}
+
+/// The live input view: the keys the host reads as held and where every axis
+/// stands, taken from the driver beside the command channel once per turn.
+fn draw_input(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let block = Block::default().borders(Borders::ALL).title(" input ");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let Some(state) = &app.input else {
+        frame.render_widget(
+            Paragraph::new(Line::from("the daemon has not answered yet")),
+            inner,
+        );
+        return;
+    };
+
+    if !state.get("available").and_then(|v| v.as_bool()).unwrap_or(false) {
+        let reason = state
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or("no input node");
+        frame.render_widget(Paragraph::new(Line::from(reason.to_string())), inner);
+        return;
+    }
+
+    let keys: Vec<String> = state
+        .get("keys")
+        .and_then(|v| v.as_array())
+        .map(|held| {
+            held.iter()
+                .map(|key| match key.get("name").and_then(|v| v.as_str()) {
+                    Some(name) => name.to_string(),
+                    None => format!(
+                        "0x{:03x}",
+                        key.get("code").and_then(|v| v.as_u64()).unwrap_or(0)
+                    ),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("held  ", Style::default().fg(MUTED)),
+            Span::styled(
+                if keys.is_empty() {
+                    "no key".to_string()
+                } else {
+                    keys.join("  ")
+                },
+                Style::default().fg(if keys.is_empty() { MUTED } else { KEY }),
+            ),
+        ]),
+        Line::from(""),
+    ];
+
+    if let Some(axes) = state.get("axes").and_then(|v| v.as_array()) {
+        for axis in axes {
+            let name = axis.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+            let position = axis.get("position").and_then(|v| v.as_i64()).unwrap_or(0);
+            let value = axis.get("value").and_then(|v| v.as_i64()).unwrap_or(0);
+            // Twenty columns of travel, and where the axis stands along them.
+            let filled = ((position.clamp(0, 1000) * 20) / 1000) as usize;
+            let bar: String = (0..20)
+                .map(|at| if at < filled { '=' } else { '.' })
+                .collect();
+            lines.push(Line::from(vec![
+                Span::styled(format!("{name:<9} "), Style::default().fg(MUTED)),
+                Span::styled(bar, Style::default().fg(ACCENT)),
+                Span::styled(
+                    format!(" {value:>6}  {position:>4}‰"),
+                    Style::default().fg(MUTED),
+                ),
+            ]));
+        }
+    }
+
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 /// The value being typed, in a box of its own over the device: a row of the
@@ -846,6 +931,7 @@ fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             ("←→", "out of / into a level"),
             ("enter", "connect / open / edit / activate"),
             ("x", "delete"),
+            ("i", "input"),
         ]),
         keys_line(&[
             ("n", "new profile"),
