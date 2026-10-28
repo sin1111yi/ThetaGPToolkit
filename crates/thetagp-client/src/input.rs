@@ -57,6 +57,12 @@ pub fn axis_name(code: u16) -> Option<&'static str> {
     Some(name)
 }
 
+/// Whether an axis code is a hat's: the kernel carries a direction as one of
+/// these, a pair per hat, and a direction is not a value along a range.
+pub fn is_hat(code: u16) -> bool {
+    (0x10..=0x17).contains(&code)
+}
+
 /// The name a key code carries, out of the gamepad set the kernel names.
 pub fn key_name(code: u16) -> Option<&'static str> {
     let name = match code {
@@ -158,6 +164,7 @@ mod tests {
         assert_eq!(pad_button_index(0x134), Some(6));
         assert_eq!(pad_button_index(0x133), Some(3));
         assert_eq!(axis_name(0x3f), None);
+        assert!(is_hat(0x10) && is_hat(0x11) && !is_hat(0x00));
         assert_eq!(key_name(0x2ff), None);
     }
 }

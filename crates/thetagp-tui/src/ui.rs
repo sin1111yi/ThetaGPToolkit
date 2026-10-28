@@ -184,8 +184,46 @@ fn draw_input(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     }
     lines.push(Line::from(""));
 
+    // A direction is not a value along a range: the hat's two axes are read as
+    // the direction they name, and the bars are left to the analog channels.
+    let mut hat = (0i64, 0i64);
     if let Some(axes) = state.get("axes").and_then(|v| v.as_array()) {
         for axis in axes {
+            let code = axis.get("code").and_then(|v| v.as_u64()).unwrap_or(0);
+            let value = axis.get("value").and_then(|v| v.as_i64()).unwrap_or(0);
+            match code {
+                0x10 => hat.0 = value,
+                0x11 => hat.1 = value,
+                _ => {}
+            }
+        }
+    }
+    let direction = match (hat.0.signum(), hat.1.signum()) {
+        (0, -1) => "↑",
+        (0, 1) => "↓",
+        (-1, 0) => "←",
+        (1, 0) => "→",
+        (-1, -1) => "↖",
+        (1, -1) => "↗",
+        (-1, 1) => "↙",
+        (1, 1) => "↘",
+        _ => "·",
+    };
+    lines.push(Line::from(vec![
+        Span::styled("dpad  ", Style::default().fg(MUTED)),
+        Span::styled(
+            direction.to_string(),
+            Style::default().fg(if direction == "·" { MUTED } else { KEY }),
+        ),
+    ]));
+    lines.push(Line::from(""));
+
+    if let Some(axes) = state.get("axes").and_then(|v| v.as_array()) {
+        for axis in axes {
+            let code = axis.get("code").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+            if thetagp_client::input::is_hat(code) {
+                continue;
+            }
             let name = axis.get("name").and_then(|v| v.as_str()).unwrap_or("?");
             let position = axis.get("position").and_then(|v| v.as_i64()).unwrap_or(0);
             let value = axis.get("value").and_then(|v| v.as_i64()).unwrap_or(0);

@@ -1467,6 +1467,33 @@ mod tests {
     }
 
     #[test]
+    fn a_direction_is_shown_as_one_and_not_as_two_axes() {
+        let mut app = App::at(daemon_on_sim());
+        app.refreshed().expect("a state");
+        app.show_input = true;
+        app.input = Some(json!({
+            "available": true,
+            "name": "a pad",
+            "keys": [],
+            "axes": [
+                { "code": 0, "name": "X", "value": 128, "min": 0, "max": 255, "position": 501 },
+                { "code": 0x10, "name": "Hat X", "value": -1, "min": -1, "max": 1, "position": 0 },
+                { "code": 0x11, "name": "Hat Y", "value": -1, "min": -1, "max": 1, "position": 0 },
+            ],
+        }));
+        let buffer = buffer_of(&app);
+
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            text.push_str(&row_text(&buffer, y));
+            text.push('\n');
+        }
+        assert!(text.contains("dpad"), "a direction has its own line");
+        assert!(text.contains("↖"), "and is named as the way it points");
+        assert!(!text.contains("Hat X"), "the hat is not an axis to draw");
+    }
+
+    #[test]
     fn a_pressed_button_lights_the_input_it_is_wired_to() {
         let mut app = App::at(daemon_on_sim());
         app.refreshed().expect("a state");
