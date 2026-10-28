@@ -226,10 +226,95 @@ fn draw_input(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     ]));
     lines.push(Line::from(""));
 
+    // A stick is a place on a plane, not two numbers: the pairs a pad carries
+    // are drawn as one circle each, and the bars are left to the axes that
+    // stand alone.
+    let pairs = [
+        ("left", 0x00u16, 0x01u16),
+        ("right", 0x03u16, 0x04u16),
+    ];
+    let axis_of = |code: u16| -> Option<(i64, i64)> {
+        state
+            .get("axes")
+            .and_then(|axes| axes.as_array())
+            .and_then(|axes| {
+                axes.iter().find(|axis| {
+                    axis.get("code").and_then(|v| v.as_u64()).unwrap_or(0xffff) as u16 == code
+                })
+            })
+            .map(|axis| {
+                (
+                    axis.get("value").and_then(|v| v.as_i64()).unwrap_or(0),
+                    axis.get("position").and_then(|v| v.as_i64()).unwrap_or(0),
+                )
+            })
+    };
+
+    // Two sticks are what a pad carries: four axes and no more. A wheel carries
+    // its own five, and its steering and throttle are not a stick.
+    let plain: Vec<u16> = state
+        .get("axes")
+        .and_then(|axes| axes.as_array())
+        .map(|axes| {
+            axes.iter()
+                .filter_map(|axis| axis.get("code").and_then(|code| code.as_u64()))
+                .map(|code| code as u16)
+                .filter(|code| !thetagp_client::input::is_hat(*code))
+                .collect()
+        })
+        .unwrap_or_default();
+    let is_pad = plain.len() == 4
+        && [0x00u16, 0x01, 0x03, 0x04].iter().all(|code| plain.contains(code));
+
+    let mut paired = Vec::new();
+    if is_pad {
+        for (name, horizontal, vertical) in pairs {
+            if let (Some((_, hp)), Some((_, vp))) = (axis_of(horizontal), axis_of(vertical)) {
+                paired.push((name, hp, vp));
+            }
+        }
+    }
+
+    if !paired.is_empty() {
+        let circles: Vec<[String; STICK_ROWS]> = paired
+            .iter()
+            .map(|(_, hp, vp)| stick(*hp, *vp))
+            .collect();
+        for row in 0..STICK_ROWS {
+            let mut spans = Vec::new();
+            for (at, circle) in circles.iter().enumerate() {
+                if at > 0 {
+                    spans.push(Span::raw("  "));
+                }
+                spans.push(Span::styled(
+                    circle[row].clone(),
+                    Style::default().fg(ACCENT),
+                ));
+            }
+            lines.push(Line::from(spans));
+        }
+        // Each stick's numbers on its own line under the pair: a percentage
+        // under a seven-column circle has less room than the number needs.
+        for (name, hp, vp) in &paired {
+            lines.push(Line::from(vec![
+                Span::styled(format!("{name:<6}"), Style::default().fg(MUTED)),
+                Span::styled(
+                    format!("X {:>3}%   Y {:>3}%", hp / 10, vp / 10),
+                    Style::default().fg(MUTED),
+                ),
+            ]));
+        }
+        lines.push(Line::from(""));
+    }
+    let paired_codes = [0x00u16, 0x01, 0x03, 0x04];
+
     if let Some(axes) = state.get("axes").and_then(|v| v.as_array()) {
         for axis in axes {
             let code = axis.get("code").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
             if thetagp_client::input::is_hat(code) {
+                continue;
+            }
+            if !paired.is_empty() && paired_codes.contains(&code) {
                 continue;
             }
             let name = axis.get("name").and_then(|v| v.as_str()).unwrap_or("?");
@@ -256,6 +341,25 @@ fn draw_input(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     }
 
     frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// How tall a stick's circle is.
+const STICK_ROWS: usize = 5;
+
+/// One stick as a circle with a mark where it stands: the horizontal and the
+/// vertical share it, a place rather than two numbers beside each other.
+fn stick(horizontal: i64, vertical: i64) -> [String; STICK_ROWS] {
+    let mut rows: [Vec<char>; STICK_ROWS] = [
+        ".-----.".chars().collect(),
+        "|     |".chars().collect(),
+        "|     |".chars().collect(),
+        "|     |".chars().collect(),
+        "'-----'".chars().collect(),
+    ];
+    let column = 1 + (horizontal.clamp(0, 1000) * 5 / 1000) as usize;
+    let line = 1 + (vertical.clamp(0, 1000) * 3 / 1000) as usize;
+    rows[line][column] = 'o';
+    rows.map(|row| row.into_iter().collect())
 }
 
 /// The value being typed, in a box of its own over the device: a row of the
