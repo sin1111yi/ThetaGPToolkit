@@ -97,7 +97,9 @@ static HAPPY: [&str; 32] = [
 pub fn button_index(code: u16) -> Option<u32> {
     match code {
         0x130..=0x13e => Some(u32::from(code - 0x130)),
-        0x2c0..=0x2df => Some(u32::from(code - 0x2c0) + 15),
+        // The bucket starts at the pad's seventeenth button, so the first
+        // code stands for the index sixteen.
+        0x2c0..=0x2df => Some(u32::from(code - 0x2c0) + 16),
         _ => None,
     }
 }
@@ -146,8 +148,9 @@ mod tests {
         assert_eq!(key_name(0x130), Some("South"));
         assert_eq!(button_index(0x130), Some(0));
         assert_eq!(button_index(0x13e), Some(14));
-        assert_eq!(button_index(0x2c0), Some(15));
-        assert_eq!(button_index(0x2cf), Some(30));
+        assert_eq!(button_index(0x2c0), Some(16));
+        assert_eq!(button_index(0x2c4), Some(20));
+        assert_eq!(button_index(0x2cf), Some(31));
         assert_eq!(button_index(0x123), None);
         assert_eq!(key_name(0x2c4), Some("H5"));
         // B1 travels as the report's fifth bit, and reads back as the fourth.
