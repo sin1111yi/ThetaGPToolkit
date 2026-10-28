@@ -1544,7 +1544,10 @@ mod tests {
             "name": "a pad",
             "keys": [{ "code": 0x130, "name": "South" }],
             "axes": [
-                { "code": 0, "name": "X", "value": 128, "min": 0, "max": 255, "position": 501 }
+                { "code": 0, "name": "X", "value": 128, "min": 0, "max": 255, "position": 501 },
+                { "code": 1, "name": "Y", "value": 128, "min": 0, "max": 255, "position": 501 },
+                { "code": 3, "name": "Rx", "value": 64, "min": 0, "max": 255, "position": 250 },
+                { "code": 4, "name": "Ry", "value": 192, "min": 0, "max": 255, "position": 750 }
             ],
         }));
         let buffer = buffer_of(&app);
@@ -1556,9 +1559,12 @@ mod tests {
         }
         assert!(text.contains("held"), "the keys the driver holds are named");
         assert!(text.contains("UP"), "each held key by the button it stands for");
-        assert!(text.contains("X "), "and every axis the node carries");
-        assert!(text.contains("128"), "with the value it reads");
-        assert!(text.contains("50%"), "and where that stands along its range");
+        assert!(text.contains("left"), "and each stick named");
+        assert!(text.contains("50%"), "with where the pair stands on its circle");
+        assert!(
+            text.chars().any(|c| ('\u{2800}'..='\u{28ff}').contains(&c)),
+            "and the stick drawn as a circle of dots"
+        );
         assert!(
             text.contains("remap (map.btn_map"),
             "and the remap table beside it, where the info column was"

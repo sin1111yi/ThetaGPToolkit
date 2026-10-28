@@ -4,6 +4,8 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use ratatui::symbols::Marker;
+use ratatui::widgets::canvas::{Canvas, Circle, Line as CanvasLine, Points};
 use ratatui::widgets::{
     Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Scrollbar,
     ScrollbarOrientation, ScrollbarState, Table, TableState, Wrap,
@@ -275,38 +277,22 @@ fn draw_input(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         }
     }
 
-    if !paired.is_empty() {
-        let circles: Vec<[String; STICK_ROWS]> = paired
-            .iter()
-            .map(|(_, hp, vp)| stick(*hp, *vp))
-            .collect();
-        for row in 0..STICK_ROWS {
-            let mut spans = Vec::new();
-            for (at, circle) in circles.iter().enumerate() {
-                if at > 0 {
-                    spans.push(Span::raw("  "));
-                }
-                spans.push(Span::styled(
-                    circle[row].clone(),
-                    Style::default().fg(ACCENT),
-                ));
-            }
-            lines.push(Line::from(spans));
-        }
-        // Each stick's numbers on its own line under the pair: a percentage
-        // under a seven-column circle has less room than the number needs.
-        for (name, hp, vp) in &paired {
-            lines.push(Line::from(vec![
-                Span::styled(format!("{name:<6}"), Style::default().fg(MUTED)),
-                Span::styled(
-                    format!("X {:>3}%   Y {:>3}%", hp / 10, vp / 10),
-                    Style::default().fg(MUTED),
-                ),
-            ]));
-        }
-        lines.push(Line::from(""));
-    }
     let paired_codes = [0x00u16, 0x01, 0x03, 0x04];
+    let head_rows = lines.len() as u16;
+    let stick_rows = if paired.is_empty() { 0 } else { STICK_ROWS as u16 + 1 };
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(head_rows),
+            Constraint::Length(stick_rows),
+            Constraint::Min(0),
+        ])
+        .split(inner);
+    frame.render_widget(Paragraph::new(std::mem::take(&mut lines)), rows[0]);
+    if !paired.is_empty() {
+        draw_sticks(frame, &paired, rows[1]);
+    }
+    let mut bars: Vec<Line> = Vec::new();
 
     if let Some(axes) = state.get("axes").and_then(|v| v.as_array()) {
         for axis in axes {
@@ -327,7 +313,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             let bar: String = (0..travel)
                 .map(|at| if at < filled { '=' } else { '.' })
                 .collect();
-            lines.push(Line::from(vec![
+            bars.push(Line::from(vec![
                 Span::styled(format!("{name:<9} "), Style::default().fg(MUTED)),
                 Span::styled(bar, Style::default().fg(ACCENT)),
                 Span::styled(
@@ -340,27 +326,107 @@ fn draw_input(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         }
     }
 
-    frame.render_widget(Paragraph::new(lines), inner);
+    frame.render_widget(Paragraph::new(bars), rows[2]);
 }
 
-/// How tall a stick's circle is.
-const STICK_ROWS: usize = 5;
+/// The sticks as the places they stand on: a circle drawn in a canvas whose
+/// dots are square, one per half a column and a quarter of a row, with a mark
+/// where the pair points.
+fn draw_sticks(frame: &mut Frame, paired: &[(&str, i64, i64)], area: ratatui::layout::Rect) {
+    let halves = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(STICK_COLS as u16),
+            Constraint::Length(2),
+            Constraint::Length(STICK_COLS as u16),
+            Constraint::Min(0),
+        ])
+        .split(area);
 
-/// One stick as a circle with a mark where it stands: the horizontal and the
-/// vertical share it, a place rather than two numbers beside each other.
-fn stick(horizontal: i64, vertical: i64) -> [String; STICK_ROWS] {
-    let mut rows: [Vec<char>; STICK_ROWS] = [
-        ".-----.".chars().collect(),
-        "|     |".chars().collect(),
-        "|     |".chars().collect(),
-        "|     |".chars().collect(),
-        "'-----'".chars().collect(),
-    ];
-    let column = 1 + (horizontal.clamp(0, 1000) * 5 / 1000) as usize;
-    let line = 1 + (vertical.clamp(0, 1000) * 3 / 1000) as usize;
-    rows[line][column] = 'o';
-    rows.map(|row| row.into_iter().collect())
+    for (index, (name, horizontal, vertical)) in paired.iter().enumerate() {
+        let at = if index == 0 { halves[0] } else { halves[2] };
+        let field = ratatui::layout::Rect {
+            height: STICK_ROWS as u16,
+            ..at
+        };
+
+        // A braille cell is two dots wide and four tall, so a square in dots is
+        // two columns wide for every row it is tall: the bounds below are that
+        // square, and the circle is round within it.
+        let half_width = STICK_COLS as f64;
+        let half_height = (STICK_ROWS as f64) * 2.0;
+        let radius = half_height - 2.0;
+        let mark_x = ((*horizontal).clamp(0, 1000) as f64 / 500.0 - 1.0) * (radius - 1.0);
+        let mark_y = -((*vertical).clamp(0, 1000) as f64 / 500.0 - 1.0) * (radius - 1.0);
+
+        let canvas = Canvas::default()
+            .marker(Marker::Braille)
+            .x_bounds([-half_width, half_width])
+            .y_bounds([-half_height, half_height])
+            .paint(|ctx| {
+                ctx.draw(&Circle {
+                    x: 0.0,
+                    y: 0.0,
+                    radius,
+                    color: MUTED,
+                });
+                ctx.draw(&CanvasLine {
+                    x1: -radius,
+                    y1: 0.0,
+                    x2: radius,
+                    y2: 0.0,
+                    color: Color::DarkGray,
+                });
+                ctx.draw(&CanvasLine {
+                    x1: 0.0,
+                    y1: -radius,
+                    x2: 0.0,
+                    y2: radius,
+                    color: Color::DarkGray,
+                });
+                // A single dot is easy to miss among the ring's own: the mark
+                // is a small block, drawn last so it sits on top of the
+                // crosshair it lands on.
+                ctx.draw(&Points {
+                    coords: &[
+                        (mark_x - 1.0, mark_y - 1.0),
+                        (mark_x, mark_y - 1.0),
+                        (mark_x + 1.0, mark_y - 1.0),
+                        (mark_x - 1.0, mark_y),
+                        (mark_x, mark_y),
+                        (mark_x + 1.0, mark_y),
+                        (mark_x - 1.0, mark_y + 1.0),
+                        (mark_x, mark_y + 1.0),
+                        (mark_x + 1.0, mark_y + 1.0),
+                    ],
+                    color: KEY,
+                });
+            });
+        frame.render_widget(canvas, field);
+
+        let caption = ratatui::layout::Rect {
+            x: at.x,
+            y: area.y + STICK_ROWS as u16,
+            width: at.width + 1,
+            height: 1,
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(format!("{name:<6}"), Style::default().fg(MUTED)),
+                Span::styled(
+                    format!("{:>3}%{:>3}%", horizontal / 10, vertical / 10),
+                    Style::default().fg(MUTED),
+                ),
+            ])),
+            caption,
+        );
+    }
 }
+
+/// The columns a stick's canvas takes, and its rows: a braille cell is two dots
+/// wide and four tall, so twice the rows in columns is a square in dots.
+const STICK_COLS: usize = 20;
+const STICK_ROWS: usize = 10;
 
 /// The value being typed, in a box of its own over the device: a row of the
 /// table is too narrow to hold a value and the names it may take beside it.
