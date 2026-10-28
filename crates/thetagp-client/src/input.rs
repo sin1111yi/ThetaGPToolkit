@@ -75,10 +75,21 @@ pub fn key_name(code: u16) -> Option<&'static str> {
         0x13c => "Mode",
         0x13d => "ThumbL",
         0x13e => "ThumbR",
+        // A pad's buttons past the fifteen the kernel names land in its
+        // trigger-happy run, which is a bucket rather than a name: the ordinal
+        // is what a reader can hold on to.
+        0x2c0..=0x2df => HAPPY[(code - 0x2c0) as usize],
         _ => return None,
     };
     Some(name)
 }
+
+/// The names of the kernel's trigger-happy run, one per slot.
+static HAPPY: [&str; 32] = [
+    "H1", "H2", "H3", "H4", "H5", "H6", "H7", "H8", "H9", "H10", "H11", "H12", "H13", "H14",
+    "H15", "H16", "H17", "H18", "H19", "H20", "H21", "H22", "H23", "H24", "H25", "H26", "H27",
+    "H28", "H29", "H30", "H31", "H32",
+];
 
 /// The button index a key code stands for on a gamepad, as the host numbers the
 /// buttons a report carries: the fifteen the kernel names, then the trigger-happy
@@ -89,6 +100,20 @@ pub fn button_index(code: u16) -> Option<u32> {
         0x2c0..=0x2df => Some(u32::from(code - 0x2c0) + 15),
         _ => None,
     }
+}
+
+/// The button a held key stands for, in the order the profile numbers them. The
+/// generic pad sends B1 to B3 in the order a host expects to read them, so the
+/// three are put back before the mapping is looked up: a light that follows the
+/// wire is worth more than one that follows the byte.
+pub fn pad_button_index(code: u16) -> Option<u32> {
+    let sent = button_index(code)?;
+    Some(match sent {
+        4 => 6,
+        5 => 4,
+        6 => 5,
+        other => other,
+    })
 }
 
 #[cfg(test)]
@@ -124,6 +149,11 @@ mod tests {
         assert_eq!(button_index(0x2c0), Some(15));
         assert_eq!(button_index(0x2cf), Some(30));
         assert_eq!(button_index(0x123), None);
+        assert_eq!(key_name(0x2c4), Some("H5"));
+        // B1 travels as the report's fifth bit, and reads back as the fourth.
+        assert_eq!(pad_button_index(0x135), Some(4));
+        assert_eq!(pad_button_index(0x134), Some(6));
+        assert_eq!(pad_button_index(0x133), Some(3));
         assert_eq!(axis_name(0x3f), None);
         assert_eq!(key_name(0x2ff), None);
     }

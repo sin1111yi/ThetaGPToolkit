@@ -826,7 +826,7 @@ fn draw_remap(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .map(|keys| {
             keys.iter()
                 .filter_map(|key| key.get("code").and_then(|code| code.as_u64()))
-                .filter_map(|code| thetagp_client::input::button_index(code as u16))
+                .filter_map(|code| thetagp_client::input::pad_button_index(code as u16))
                 .map(|index| index as i32)
                 .collect()
         })
