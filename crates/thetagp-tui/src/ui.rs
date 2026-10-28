@@ -118,17 +118,25 @@ fn draw_input(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         return;
     }
 
+    // The keys the host reads as held, named the way the profile names the
+    // button each stands for: the kernel's own names stop at the pad's fifteenth
+    // button, and the rest of a report would read as a bucket's ordinal.
     let keys: Vec<String> = state
         .get("keys")
         .and_then(|v| v.as_array())
         .map(|held| {
             held.iter()
-                .map(|key| match key.get("name").and_then(|v| v.as_str()) {
-                    Some(name) => name.to_string(),
-                    None => format!(
-                        "0x{:03x}",
-                        key.get("code").and_then(|v| v.as_u64()).unwrap_or(0)
-                    ),
+                .map(|key| {
+                    let code = key.get("code").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+                    if let Some(index) = thetagp_client::input::pad_button_index(code) {
+                        if let Some(name) = labels::button(index as i32) {
+                            return name;
+                        }
+                    }
+                    match key.get("name").and_then(|v| v.as_str()) {
+                        Some(name) => name.to_string(),
+                        None => format!("0x{code:03x}"),
+                    }
                 })
                 .collect()
         })

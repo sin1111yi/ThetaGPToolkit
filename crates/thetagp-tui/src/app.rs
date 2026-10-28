@@ -1555,7 +1555,7 @@ mod tests {
             text.push('\n');
         }
         assert!(text.contains("held"), "the keys the driver holds are named");
-        assert!(text.contains("South"), "each held key by its name");
+        assert!(text.contains("UP"), "each held key by the button it stands for");
         assert!(text.contains("X "), "and every axis the node carries");
         assert!(text.contains("128"), "with the value it reads");
         assert!(text.contains("50%"), "and where that stands along its range");
