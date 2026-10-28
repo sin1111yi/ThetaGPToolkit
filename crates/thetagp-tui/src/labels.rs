@@ -122,9 +122,20 @@ pub fn slot(value: i32) -> String {
     }
 }
 
+/// The input modes this firmware does not present: the schema carries the numbers
+/// for boards that do, and a mode named here is one no board answers with.
+pub fn unsupported_mode(number: i32) -> bool {
+    number == thetagp_proto::thetagp::InputMode::Keyboard as i32
+}
+
 /// A key's value as the table shows it: the name its enum gives the number,
-/// with the number beside it, or the bare number when the schema names none.
+/// with the number beside it, or the bare number when the schema names none. An
+/// input mode this firmware leaves out reads as unsupported rather than by a
+/// name the board does not act on.
 pub fn value(key: &thetagp_client::Key, number: i32) -> String {
+    if key.name == "usb.input_mode" && unsupported_mode(number) {
+        return format!("unsupported ({number})");
+    }
     match &key.value_enum {
         Some(enum_name) => match thetagp_proto::enum_value_name(enum_name, number) {
             Some(name) => format!("{name} ({number})"),
@@ -177,6 +188,24 @@ mod tests {
         };
         assert_eq!(value(&key, 0), "UpPriority (0)");
         assert_eq!(value(&key, 2), "SecondInputPriority (2)");
+    }
+
+    #[test]
+    fn an_input_mode_the_firmware_leaves_out_is_not_named() {
+        let key = thetagp_client::Key {
+            name: "usb.input_mode".into(),
+            domain: "usb".into(),
+            leaf: "input_mode".into(),
+            kind: thetagp_client::KeyType::U8,
+            min: 0,
+            max: 255,
+            count: 1,
+            reboot: true,
+            accepts_unmapped: false,
+            value_enum: Some("InputMode".into()),
+        };
+        assert_eq!(value(&key, 3), "unsupported (3)");
+        assert_eq!(value(&key, 14), "GENERIC (14)");
     }
 
     #[test]

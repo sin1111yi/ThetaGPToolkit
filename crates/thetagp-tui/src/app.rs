@@ -1031,6 +1031,11 @@ fn choices_of(key: &Key) -> Vec<(String, i32)> {
         .as_deref()
         .map(thetagp_proto::enum_values)
         .unwrap_or_default();
+    // An input mode the firmware does not present is not a value a reader may
+    // choose: the schema carries it for boards that answer it.
+    if key.name == "usb.input_mode" {
+        choices.retain(|(_, number)| !crate::labels::unsupported_mode(*number));
+    }
     if choices.is_empty() {
         return choices;
     }
@@ -1207,6 +1212,10 @@ mod tests {
         assert!(
             choices.iter().any(|(name, number)| name == "GENERIC" && *number == 14),
             "the mode the device is in is among them: {choices:?}"
+        );
+        assert!(
+            !choices.iter().any(|(_, number)| *number == 3),
+            "a mode the firmware leaves out is not offered: {choices:?}"
         );
     }
 
