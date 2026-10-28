@@ -356,8 +356,11 @@ fn draw_sticks(frame: &mut Frame, paired: &[(&str, i64, i64)], area: ratatui::la
         let half_width = STICK_COLS as f64;
         let half_height = (STICK_ROWS as f64) * 2.0;
         let radius = half_height - 2.0;
-        let mark_x = ((*horizontal).clamp(0, 1000) as f64 / 500.0 - 1.0) * (radius - 1.0);
-        let mark_y = -((*vertical).clamp(0, 1000) as f64 / 500.0 - 1.0) * (radius - 1.0);
+        // The mark is a block of dots, so its whole extent stays inside the ring:
+        // the travel is the radius less the square the mark takes up.
+        let travel = radius - 2.0;
+        let mark_x = ((*horizontal).clamp(0, 1000) as f64 / 500.0 - 1.0) * travel;
+        let mark_y = -((*vertical).clamp(0, 1000) as f64 / 500.0 - 1.0) * travel;
 
         let canvas = Canvas::default()
             .marker(Marker::Braille)
@@ -384,18 +387,12 @@ fn draw_sticks(frame: &mut Frame, paired: &[(&str, i64, i64)], area: ratatui::la
                     y2: radius,
                     color: Color::DarkGray,
                 });
-                // A single dot is easy to miss among the ring's own: the mark
-                // is a small block, drawn last so it sits on top of the
-                // crosshair it lands on.
+                // Four dots: enough to see against the ring, small enough that
+                // the mark is a point rather than a shape of its own.
                 ctx.draw(&Points {
                     coords: &[
-                        (mark_x - 1.0, mark_y - 1.0),
-                        (mark_x, mark_y - 1.0),
-                        (mark_x + 1.0, mark_y - 1.0),
-                        (mark_x - 1.0, mark_y),
                         (mark_x, mark_y),
                         (mark_x + 1.0, mark_y),
-                        (mark_x - 1.0, mark_y + 1.0),
                         (mark_x, mark_y + 1.0),
                         (mark_x + 1.0, mark_y + 1.0),
                     ],
