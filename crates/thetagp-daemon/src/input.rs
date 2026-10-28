@@ -1,10 +1,5 @@
-//! The input device beside the port, read as the kernel holds it.
-//!
-//! A HID gamepad's reports reach the host's own driver, and the state that
-//! driver holds is what a game reads. The kernel hands that state back through
-//! two ioctls rather than through a stream -- one for the keys and one per axis
-//! -- so a reading costs the device nothing and does not wait for a report to
-//! change.
+//! The input device beside the port, read as the kernel holds it: the keys held
+//! and the axes, through the ioctls that answer a state rather than a stream.
 
 use std::os::unix::io::AsRawFd;
 

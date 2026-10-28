@@ -184,9 +184,8 @@ impl Service {
                 Err(_) => Err(("the device is in an unusable state".to_string(), -32603)),
                 Ok(held) => match held.as_ref() {
                     None => Err(("nothing is connected".to_string(), -32002)),
-                    // The state the host's own driver holds, read through the
-                    // kernel: what a game sees, and nothing the device has to be
-                    // asked for.
+                    // What a game sees: the host driver's own state, read
+                    // through the kernel.
                     Some(open) => match input::read(&open.source) {
                         Err(reason) => Ok(json!({ "available": false, "reason": reason })),
                         Ok(reading) => Ok(json!({

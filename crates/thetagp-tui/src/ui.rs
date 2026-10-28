@@ -44,9 +44,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         .constraints([Constraint::Ratio(1, 3), Constraint::Ratio(2, 3)])
         .split(columns[1]);
     if app.show_input {
-        // The live view takes the whole of the device's side, and the remap
-        // table moves to the column beside it: what the inputs are wired to is
-        // what a reader checks a press against.
+        // The live view takes the device's whole side; the remap moves beside it.
         draw_input(frame, app, columns[0]);
         draw_remap(frame, app, aside[0]);
     } else {
@@ -120,9 +118,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         return;
     }
 
-    // The keys the host reads as held, named the way the profile names the
-    // button each stands for: the kernel's own names stop at the pad's fifteenth
-    // button, and the rest of a report would read as a bucket's ordinal.
+    // The held keys, named by the button each stands for.
     let keys: Vec<String> = state
         .get("keys")
         .and_then(|v| v.as_array())
@@ -156,9 +152,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ),
     ])];
 
-    // The buttons a report can carry, as a pad's face: one lit for each the host
-    // reads as held, so a press is found by the button it is rather than by the
-    // order its name came in.
+    // The pad's face: one cell per button, lit for each the host reads as held.
     let held_buttons: Vec<u32> = state
         .get("keys")
         .and_then(|keys| keys.as_array())
@@ -228,9 +222,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     ]));
     lines.push(Line::from(""));
 
-    // A stick is a place on a plane, not two numbers: the pairs a pad carries
-    // are drawn as one circle each, and the bars are left to the axes that
-    // stand alone.
+    // A pad's two sticks, as the circle each stands on.
     let pairs = [
         ("left", 0x00u16, 0x01u16),
         ("right", 0x03u16, 0x04u16),
@@ -329,9 +321,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     frame.render_widget(Paragraph::new(bars), rows[2]);
 }
 
-/// The sticks as the places they stand on: a circle drawn in a canvas whose
-/// dots are square, one per half a column and a quarter of a row, with a mark
-/// where the pair points.
+/// The sticks as circles of dots, with a mark where each pair points.
 fn draw_sticks(frame: &mut Frame, paired: &[(&str, i64, i64)], area: ratatui::layout::Rect) {
     let halves = Layout::default()
         .direction(Direction::Horizontal)
@@ -350,9 +340,8 @@ fn draw_sticks(frame: &mut Frame, paired: &[(&str, i64, i64)], area: ratatui::la
             ..at
         };
 
-        // A braille cell is two dots wide and four tall, so a square in dots is
-        // two columns wide for every row it is tall: the bounds below are that
-        // square, and the circle is round within it.
+        // A braille cell is two dots wide and four tall, so twice the rows in
+        // columns is a square in dots.
         let half_width = STICK_COLS as f64;
         let half_height = (STICK_ROWS as f64) * 2.0;
         let radius = half_height - 2.0;
@@ -1060,11 +1049,8 @@ fn draw_remap(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .border_style(Style::default().fg(border))
         .title(" remap (map.btn_map → button index) ");
 
-    // The buttons the host reads as held this turn, so a slot feeding one of
-    // them is lit: a press is checked against the input it is wired to. The
-    // numbering is the generic pad's, which is the one this firmware's buttons
-    // travel as; a console mode numbers its buttons its own way, and a wrong
-    // light is worse than none.
+    // The buttons held this turn: a slot feeding one is lit. The numbering is the
+    // generic pad's, and a console mode numbers its own, so only that mode lights.
     let held: Vec<i32> = if app.input_mode() != Some(14) {
         Vec::new()
     } else {
