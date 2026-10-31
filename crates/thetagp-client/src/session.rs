@@ -648,6 +648,97 @@ impl<T: Transport> Session<T> {
         })
     }
 
+    /// The bytes the flash holds from `addr`: a run of up to one sector, read
+    /// whole.
+    ///
+    /// The opening arm answers the request; the pieces and the end that closes
+    /// the stream answer the exchange and carry the zero the schema reserves for
+    /// that, so they are read until the end arm arrives.
+    pub fn flash_read(&mut self, addr: u32, len: u32) -> Result<Vec<u8>, SessionError> {
+        let reply = self.send(proto::request::Kind::TestFlashRead(proto::TestFlashRead {
+            addr,
+            len,
+        }))?;
+        let start = expect(reply, |kind| match kind {
+            proto::reply::Kind::TestFlashRead(start) => Some(start),
+            _ => None,
+        })?;
+
+        let declared = start.total as usize;
+        let mut body = vec![0u8; declared];
+        let mut filled = 0usize;
+        loop {
+            let reply = self.read_until(is_stream_frame)?;
+            match reply.kind {
+                Some(proto::reply::Kind::TestFlashChunk(chunk)) => {
+                    let at = chunk.offset as usize;
+                    let end = at + chunk.data.len();
+                    if end > body.len() {
+                        return Err(SessionError::ShortStream {
+                            received: filled,
+                            declared,
+                        });
+                    }
+                    body[at..end].copy_from_slice(&chunk.data);
+                    filled = filled.max(end);
+                }
+                Some(proto::reply::Kind::TestFlashEnd(end)) => {
+                    if filled != declared || end.total as usize != declared {
+                        return Err(SessionError::ShortStream {
+                            received: filled,
+                            declared,
+                        });
+                    }
+                    return Ok(body);
+                }
+                Some(proto::reply::Kind::Error(error)) => {
+                    return Err(SessionError::Refused(Box::new(error)));
+                }
+                Some(proto::reply::Kind::TransportError(fault)) => {
+                    return Err(SessionError::Transport(Box::new(fault)));
+                }
+                _ => return Err(SessionError::UnexpectedArm),
+            }
+        }
+    }
+
+    /// Programs `data` into the flash at `addr`.
+    ///
+    /// The write is a page program alone: the sector has to be erased before it,
+    /// and a byte that was not erased reads back as a bitwise and of the two.
+    /// The answer's `ok` is whether the write reached the chip.
+    pub fn flash_write(
+        &mut self,
+        addr: u32,
+        data: &[u8],
+    ) -> Result<proto::TestFlashWriteOk, SessionError> {
+        let reply = self.send(proto::request::Kind::TestFlashWrite(
+            proto::TestFlashWrite {
+                addr,
+                len: data.len() as u32,
+                data: data.to_vec(),
+            },
+        ))?;
+        expect(reply, |kind| match kind {
+            proto::reply::Kind::TestFlashWrite(ok) => Some(ok),
+            _ => None,
+        })
+    }
+
+    /// Erases the flash sector holding `addr`.
+    ///
+    /// A sector the chip refused answers with `ok` false rather than with an
+    /// error: the device did reach the chip, and the chip said no.
+    pub fn erase_sector(&mut self, addr: u32) -> Result<proto::TestEraseSectorOk, SessionError> {
+        let reply = self.send(proto::request::Kind::TestEraseSector(
+            proto::TestEraseSector { addr },
+        ))?;
+        expect(reply, |kind| match kind {
+            proto::reply::Kind::TestEraseSector(ok) => Some(ok),
+            _ => None,
+        })
+    }
+
     /// What the keypad driver is doing: the scan rate, the mat it is wired with,
     /// and the scan and commit timings it has seen.
     pub fn keypad_scan(&mut self) -> Result<proto::TestKeypadScanOk, SessionError> {

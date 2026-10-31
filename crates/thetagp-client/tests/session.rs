@@ -1,6 +1,7 @@
 //! The exchange, held against a device that answers in the process: the
 //! numbering, the arms that come back, and the ways one does not.
 
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use thetagp_client::backup::{Snapshot, StoredProfile};
@@ -303,4 +304,175 @@ fn a_snapshot_does_not_write_the_factory_profile() {
         "the factory profile is skipped, not refused: {:?}",
         restored.profiles_refused
     );
+}
+
+// ── the flash, read and programmed raw ──
+
+/// A two-sector image, and the answers a board gives to the arms that reach the
+/// chip directly. `write_ok` and `erase_ok` are what the chip says: a refusal is
+/// a value of the arm rather than an error, so both arrive as `false`.
+fn flash_device(
+    image: Arc<Mutex<Vec<u8>>>,
+    write_ok: bool,
+    erase_ok: bool,
+) -> impl Fn(proto::Request) -> Vec<proto::Reply> + Send + 'static {
+    move |request| {
+        let number = request.queued.map(|taken| taken.wrapping_add(1));
+        let Some(asked) = request.kind else {
+            return Vec::new();
+        };
+        match asked {
+            proto::request::Kind::TestFlashRead(asked) => {
+                let image = image.lock().expect("the image is not poisoned");
+                let at = asked.addr as usize;
+                let len = asked.len as usize;
+                assert!(at + len <= image.len(), "the run is inside the image");
+                let run = image[at..at + len].to_vec();
+                let mut replies = vec![proto::Reply {
+                    queued: number,
+                    kind: Some(proto::reply::Kind::TestFlashRead(
+                        proto::TestFlashReadStart {
+                            total: len as u32,
+                            addr: asked.addr,
+                        },
+                    )),
+                }];
+                let mut piece = 0;
+                while piece < len {
+                    let end = (piece + 1000).min(len);
+                    replies.push(proto::Reply {
+                        queued: Some(0),
+                        kind: Some(proto::reply::Kind::TestFlashChunk(proto::TestFlashChunk {
+                            offset: piece as u32,
+                            data: run[piece..end].to_vec(),
+                        })),
+                    });
+                    piece = end;
+                }
+                replies.push(proto::Reply {
+                    queued: Some(0),
+                    kind: Some(proto::reply::Kind::TestFlashEnd(proto::TestFlashEnd {
+                        total: len as u32,
+                        addr: asked.addr,
+                    })),
+                });
+                replies
+            }
+            proto::request::Kind::TestFlashWrite(asked) => {
+                if write_ok {
+                    let mut image = image.lock().expect("the image is not poisoned");
+                    for (slot, byte) in image[asked.addr as usize..].iter_mut().zip(&asked.data) {
+                        *slot &= *byte;
+                    }
+                }
+                vec![proto::Reply {
+                    queued: number,
+                    kind: Some(proto::reply::Kind::TestFlashWrite(
+                        proto::TestFlashWriteOk {
+                            addr: asked.addr,
+                            len: asked.len,
+                            ok: write_ok,
+                        },
+                    )),
+                }]
+            }
+            proto::request::Kind::TestEraseSector(asked) => {
+                if erase_ok {
+                    let mut image = image.lock().expect("the image is not poisoned");
+                    let sector = asked.addr as usize & !4095;
+                    image[sector..sector + 4096].fill(0xFF);
+                }
+                vec![proto::Reply {
+                    queued: number,
+                    kind: Some(proto::reply::Kind::TestEraseSector(
+                        proto::TestEraseSectorOk {
+                            addr: asked.addr,
+                            ok: erase_ok,
+                        },
+                    )),
+                }]
+            }
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// Two sectors, the second holding a pattern of its own.
+fn two_sectors() -> (Arc<Mutex<Vec<u8>>>, Vec<u8>) {
+    let pattern: Vec<u8> = (0..4096u32)
+        .map(|i| ((i * 73 + 0x5a) & 0xff) as u8)
+        .collect();
+    let mut image = vec![0xFFu8; 8192];
+    image[4096..].copy_from_slice(&pattern);
+    (Arc::new(Mutex::new(image)), pattern)
+}
+
+#[test]
+fn a_flash_run_comes_back_whole() {
+    let (image, pattern) = two_sectors();
+    let mut session = session_with(flash_device(image, true, true));
+    let bytes = session.flash_read(0x1000, 4096).unwrap();
+    assert_eq!(bytes, pattern);
+    // The pieces answer the exchange, not the request: the numbering stands.
+    assert_eq!(session.sequence().next(), 2);
+}
+
+#[test]
+fn a_sector_is_erased_and_programmed_through_the_raw_arms() {
+    let (image, pattern) = two_sectors();
+    let mut session = session_with(flash_device(image.clone(), true, true));
+    assert!(session.erase_sector(0x1000).unwrap().ok);
+    let blank = session.flash_read(0x1000, 4096).unwrap();
+    assert!(
+        blank.iter().all(|byte| *byte == 0xFF),
+        "the sector is erased"
+    );
+    let wrote = session.flash_write(0x1000, &pattern[..256]).unwrap();
+    assert!(wrote.ok);
+    assert_eq!(wrote.len, 256);
+    assert_eq!(session.flash_read(0x1000, 256).unwrap(), &pattern[..256]);
+    assert_eq!(&image.lock().unwrap()[4096..4352], &pattern[..256]);
+}
+
+#[test]
+fn a_chip_that_refuses_says_so_rather_than_failing_the_exchange() {
+    let (image, _) = two_sectors();
+    let mut session = session_with(flash_device(image, false, false));
+    assert!(!session.erase_sector(0x1000).unwrap().ok);
+    assert!(!session.flash_write(0x1000, &[0x00; 4]).unwrap().ok);
+}
+
+#[test]
+fn a_flash_run_that_stops_short_is_refused() {
+    let mut session = session_with(|request| {
+        let number = request.queued.map(|taken| taken.wrapping_add(1));
+        vec![
+            proto::Reply {
+                queued: number,
+                kind: Some(proto::reply::Kind::TestFlashRead(
+                    proto::TestFlashReadStart { total: 20, addr: 0 },
+                )),
+            },
+            proto::Reply {
+                queued: Some(0),
+                kind: Some(proto::reply::Kind::TestFlashChunk(proto::TestFlashChunk {
+                    offset: 0,
+                    data: vec![0u8; 10],
+                })),
+            },
+            proto::Reply {
+                queued: Some(0),
+                kind: Some(proto::reply::Kind::TestFlashEnd(proto::TestFlashEnd {
+                    total: 20,
+                    addr: 0,
+                })),
+            },
+        ]
+    });
+    match session.flash_read(0, 20).unwrap_err() {
+        SessionError::ShortStream { received, declared } => {
+            assert_eq!((received, declared), (10, 20));
+        }
+        other => panic!("{other}"),
+    }
 }

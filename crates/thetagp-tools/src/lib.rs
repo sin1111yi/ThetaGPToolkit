@@ -46,6 +46,19 @@ pub fn catalogue() -> Json {
         }), &[]),
         tool("keypad", "What the keypad driver is doing: its rate, its mat and its timings.", json!({}), &[]),
         tool("flash", "What the flash chip is: how large, how programmed, how erased.", json!({}), &[]),
+        tool("flash_read", "The bytes the flash holds from an address, up to one sector.", json!({
+            "addr": { "type": "integer", "description": "The first address to read" },
+            "len": { "type": "integer", "description": "How many bytes to read, 1 to 4096" },
+        }), &["addr", "len"]),
+        tool("flash_write", "Programs bytes into erased flash at an address; a page program alone, so the sector is erased first. Raw and destructive, so it takes `confirm`.", json!({
+            "addr": { "type": "integer", "description": "The first address to write" },
+            "data": { "type": "string", "description": "The bytes to write, in hex" },
+            "confirm": { "type": "boolean", "description": "Must be true: the bytes reach the chip as they are given" },
+        }), &["addr", "data", "confirm"]),
+        tool("flash_erase", "Erases the flash sector holding an address. Raw and destructive, so it takes `confirm`.", json!({
+            "addr": { "type": "integer", "description": "An address inside the sector to erase" },
+            "confirm": { "type": "boolean", "description": "Must be true: the sector is erased as it is asked" },
+        }), &["addr", "confirm"]),
         tool("keys", "Every configuration key the device declares, with its range and shape.", json!({
             "domain": { "type": "string", "description": "Report only the keys under this domain" },
         }), &[]),
@@ -126,6 +139,15 @@ fn body_settings(body: &Json, prefix: &str, into: &mut BTreeMap<String, Value>) 
     }
 }
 
+/// The arms that reach the chip raw take an explicit `confirm`, so an erase or a
+/// write is asked for rather than reached by a slip of a name.
+fn confirmed(arguments: &Json) -> Result<(), Error> {
+    if arguments.get("confirm").and_then(Json::as_bool) == Some(true) {
+        return Ok(());
+    }
+    Err("this reaches raw flash: pass \"confirm\": true to do it".into())
+}
+
 /// Runs one tool.
 pub fn call<T: Transport>(
     session: &mut Session<T>,
@@ -184,6 +206,29 @@ pub fn call<T: Transport>(
         },
         "keypad" => text(format!("{:#?}", session.keypad_scan()?)),
         "flash" => text(format!("{:#?}", session.flash_info()?)),
+        "flash_read" => {
+            let addr = number("addr")? as u32;
+            let len = number("len")? as u32;
+            let bytes = session.flash_read(addr, len)?;
+            text(json!({
+                "addr": addr,
+                "len": bytes.len(),
+                "data": dynamic::hex_of(&bytes),
+            }))
+        }
+        "flash_write" => {
+            confirmed(arguments)?;
+            let addr = number("addr")? as u32;
+            let data = dynamic::parse_hex(&string("data")?)?;
+            let wrote = session.flash_write(addr, &data)?;
+            text(json!({ "addr": wrote.addr, "len": wrote.len, "ok": wrote.ok }))
+        }
+        "flash_erase" => {
+            confirmed(arguments)?;
+            let addr = number("addr")? as u32;
+            let erased = session.erase_sector(addr)?;
+            text(json!({ "addr": erased.addr, "ok": erased.ok }))
+        }
         "keys" => {
             let space = session.key_space()?;
             let keys: Vec<&thetagp_client::Key> =
