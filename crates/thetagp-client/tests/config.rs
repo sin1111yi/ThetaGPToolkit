@@ -134,7 +134,7 @@ fn a_snapshot_of_a_device_goes_onto_another() {
         .unwrap();
     wanted.apply(&mut first, &before).unwrap();
     let body = br#"{"ver":2,"led":{"bri":77}}"#;
-    first.profile_put(1, body).unwrap();
+    first.profile_create(body).unwrap();
 
     // The snapshot is the file a device is kept as.
     let snapshot = Snapshot::take(&mut first).unwrap();
@@ -179,4 +179,43 @@ fn a_snapshot_the_target_cannot_take_is_reported() {
     let restored = snapshot.restore(&mut session).unwrap();
     assert_eq!(restored.keys_unknown, vec!["board.only_key".to_string()]);
     assert_eq!(restored.keys_refused, vec!["led.bri".to_string()]);
+}
+
+#[test]
+fn missing_profiles_are_created_and_the_active_id_is_mapped() {
+    let mut source = session();
+    let first = source
+        .profile_create(br#"{"ver":2,"name":"first"}"#)
+        .unwrap();
+    let second = source
+        .profile_create(br#"{"ver":2,"name":"second"}"#)
+        .unwrap();
+    source.profile_delete(first).unwrap();
+    source.profile_select(second).unwrap();
+    let snapshot = Snapshot::take(&mut source).unwrap();
+    let mut target = session();
+    let restored = snapshot.restore(&mut target).unwrap();
+    let mapped = restored.profile_ids[&second];
+    assert_eq!(mapped, 1);
+    assert_eq!(restored.active_profile, Some(mapped));
+    assert_eq!(target.profiles().unwrap().active, mapped);
+    assert_eq!(
+        target.profile_get(mapped).unwrap(),
+        br#"{"ver":2,"name":"second"}"#
+    );
+}
+
+#[test]
+fn a_missing_named_profile_is_refused_by_the_simulator() {
+    let mut device = session();
+    assert!(matches!(
+        device.profile_put(9, b"{}"),
+        Err(thetagp_client::SessionError::Refused(_))
+    ));
+}
+
+#[test]
+fn old_snapshots_without_an_active_profile_are_accepted() {
+    let old = r#"{"board":"x","version":"1","config":{},"profiles":[]}"#;
+    assert_eq!(Snapshot::from_json(old).unwrap().active_profile, None);
 }

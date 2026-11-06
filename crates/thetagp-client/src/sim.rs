@@ -147,8 +147,8 @@ pub fn common(request: proto::Request) -> Vec<proto::Reply> {
         }
         proto::request::Kind::ConfigListKeys(_) => {
             proto::reply::Kind::ConfigListKeys(proto::ConfigListKeysOk {
-                    inputs: 8,
-                    count: 2,
+                inputs: 8,
+                count: 2,
                 keys: vec![
                     proto::ConfigKeyEntry {
                         key: "led.bri".to_string(),
@@ -260,7 +260,10 @@ pub fn device() -> SimulatedDevice {
                         len,
                     }))
                 }
-                None => refused(proto::ErrorCode::ErrInvalidState, proto::Reason::None),
+                None => refused(
+                    proto::ErrorCode::ErrInternal,
+                    proto::Reason::ProfileWriteFailed,
+                ),
             },
 
             // ── a body on its way back to the host ──
@@ -466,6 +469,11 @@ impl ProfileStore {
         let staging = self.staging.take()?;
         if staging.bytes.len() != staging.total {
             return None;
+        }
+        if let Some(id) = staging.id {
+            if !self.bodies.contains_key(&id) {
+                return None;
+            }
         }
         let created = staging.id.is_none_or(|id| id == 0);
         let id = staging

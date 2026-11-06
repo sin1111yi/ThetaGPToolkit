@@ -14,6 +14,34 @@ use thetagp_client::{Session, Snapshot, Transport, Value, dynamic, wire};
 
 type Error = Box<dyn std::error::Error>;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use thetagp_client::sim::SimulatedDevice;
+
+    #[test]
+    fn oversized_addresses_and_ids_never_reach_the_device() {
+        for (name, arguments) in [
+            ("flash_read", json!({"addr": 4294967296u64, "len": 1})),
+            ("flash_read", json!({"addr": 0, "len": 4294967297u64})),
+            (
+                "flash_write",
+                json!({"addr": 4294967296u64, "data": "00", "confirm": true}),
+            ),
+            (
+                "flash_erase",
+                json!({"addr": 4294967296u64, "confirm": true}),
+            ),
+            ("profile_delete", json!({"id": 4294967296u64})),
+        ] {
+            let device = SimulatedDevice::new(|_| panic!("invalid argument reached the device"));
+            let mut session = Session::new(device, Duration::from_millis(10));
+            assert!(call(&mut session, name, &arguments).is_err(), "{name}");
+        }
+    }
+}
+
 /// The answer of a tool: the text of what it did.
 fn text(payload: impl Into<Json>) -> Json {
     let payload: Json = payload.into();
@@ -167,6 +195,9 @@ pub fn call<T: Transport>(
             .and_then(Json::as_u64)
             .ok_or_else(|| format!("{name} is missing").into())
     };
+    let number32 = |name: &str| -> Result<u32, Error> {
+        u32::try_from(number(name)?).map_err(|_| format!("{name} is out of range").into())
+    };
 
     Ok(match name {
         "ping" => {
@@ -176,8 +207,8 @@ pub fn call<T: Transport>(
         "ports" => {
             // The machine's ports, not the connection's: what a host may open
             // rather than what it has open.
-            let ports = thetagp_client::transport::available_ports()
-                .map_err(|error| error.to_string())?;
+            let ports =
+                thetagp_client::transport::available_ports().map_err(|error| error.to_string())?;
             text(serde_json::to_value(ports)?)
         }
         "version" => {
@@ -207,8 +238,8 @@ pub fn call<T: Transport>(
         "keypad" => text(format!("{:#?}", session.keypad_scan()?)),
         "flash" => text(format!("{:#?}", session.flash_info()?)),
         "flash_read" => {
-            let addr = number("addr")? as u32;
-            let len = number("len")? as u32;
+            let addr = number32("addr")?;
+            let len = number32("len")?;
             let bytes = session.flash_read(addr, len)?;
             text(json!({
                 "addr": addr,
@@ -218,14 +249,14 @@ pub fn call<T: Transport>(
         }
         "flash_write" => {
             confirmed(arguments)?;
-            let addr = number("addr")? as u32;
+            let addr = number32("addr")?;
             let data = dynamic::parse_hex(&string("data")?)?;
             let wrote = session.flash_write(addr, &data)?;
             text(json!({ "addr": wrote.addr, "len": wrote.len, "ok": wrote.ok }))
         }
         "flash_erase" => {
             confirmed(arguments)?;
-            let addr = number("addr")? as u32;
+            let addr = number32("addr")?;
             let erased = session.erase_sector(addr)?;
             text(json!({ "addr": erased.addr, "ok": erased.ok }))
         }
@@ -335,12 +366,12 @@ pub fn call<T: Transport>(
         }
         "profile_status" => text(format!("{:#?}", session.profile_status()?)),
         "profile_get" => {
-            let id = number("id")? as u32;
+            let id = number32("id")?;
             let body = session.profile_get(id)?;
             text(json!({ "id": id, "body": String::from_utf8_lossy(&body) }))
         }
         "profile_put" => {
-            let id = number("id")? as u32;
+            let id = number32("id")?;
             let body = string("body")?;
             let written = session.profile_put(id, body.as_bytes())?;
             text(json!({ "id": written, "bytes": body.len() }))
@@ -351,11 +382,11 @@ pub fn call<T: Transport>(
             text(json!({ "id": id, "bytes": body.len() }))
         }
         "profile_select" => {
-            let id = number("id")? as u32;
+            let id = number32("id")?;
             text(json!({ "active": session.profile_select(id)?.id }))
         }
         "profile_delete" => {
-            let id = number("id")? as u32;
+            let id = number32("id")?;
             text(json!({ "deleted": session.profile_delete(id)?.id }))
         }
         "snapshot" => {
@@ -364,12 +395,17 @@ pub fn call<T: Transport>(
         }
         "restore" => {
             let taken = Snapshot::from_json(&string("snapshot")?)?;
-            let restored = taken.restore(session)?;
+            let restored = taken
+                .restore(session)
+                .map_err(|error| format!("restore may be partial: {error}"))?;
             text(json!({
                 "values_written": restored.values_written,
                 "profiles_written": restored.profiles_written,
                 "keys_unknown": restored.keys_unknown,
                 "keys_refused": restored.keys_refused,
+                "profiles_refused": restored.profiles_refused,
+                "profile_ids": restored.profile_ids,
+                "active_profile": restored.active_profile,
             }))
         }
         "enter_dfu" => {

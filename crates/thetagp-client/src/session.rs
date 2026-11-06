@@ -73,6 +73,8 @@ pub enum SessionError {
     UnexpectedArm,
     /// A stream ended with fewer bytes than its opening arm declared.
     ShortStream { received: usize, declared: usize },
+    /// A stream's metadata or piece order does not match its request.
+    InvalidStream,
 }
 
 impl std::fmt::Display for SessionError {
@@ -110,6 +112,9 @@ impl std::fmt::Display for SessionError {
                 formatter,
                 "a stream carried {received} of the {declared} bytes it declared"
             ),
+            SessionError::InvalidStream => {
+                write!(formatter, "a stream's metadata or offsets do not match")
+            }
         }
     }
 }
@@ -533,6 +538,10 @@ impl<T: Transport> Session<T> {
             _ => None,
         })?;
 
+        if start.id != id || start.total > 4096 {
+            return Err(SessionError::InvalidStream);
+        }
+
         let declared = start.total as usize;
         let mut body = vec![0u8; declared];
         let mut filled = 0usize;
@@ -541,6 +550,9 @@ impl<T: Transport> Session<T> {
             match reply.kind {
                 Some(proto::reply::Kind::ProfileChunk(chunk)) => {
                     let at = chunk.offset as usize;
+                    if at != filled || chunk.data.is_empty() {
+                        return Err(SessionError::InvalidStream);
+                    }
                     let end = at + chunk.data.len();
                     if end > body.len() {
                         return Err(SessionError::ShortStream {
@@ -549,9 +561,12 @@ impl<T: Transport> Session<T> {
                         });
                     }
                     body[at..end].copy_from_slice(&chunk.data);
-                    filled = filled.max(end);
+                    filled = end;
                 }
                 Some(proto::reply::Kind::ProfileEnd(end)) => {
+                    if end.id != id {
+                        return Err(SessionError::InvalidStream);
+                    }
                     if filled != declared || end.total as usize != declared {
                         return Err(SessionError::ShortStream {
                             received: filled,
@@ -664,6 +679,10 @@ impl<T: Transport> Session<T> {
             _ => None,
         })?;
 
+        if start.addr != addr || start.total != len || len == 0 || len > 4096 {
+            return Err(SessionError::InvalidStream);
+        }
+
         let declared = start.total as usize;
         let mut body = vec![0u8; declared];
         let mut filled = 0usize;
@@ -672,6 +691,9 @@ impl<T: Transport> Session<T> {
             match reply.kind {
                 Some(proto::reply::Kind::TestFlashChunk(chunk)) => {
                     let at = chunk.offset as usize;
+                    if at != filled || chunk.data.is_empty() {
+                        return Err(SessionError::InvalidStream);
+                    }
                     let end = at + chunk.data.len();
                     if end > body.len() {
                         return Err(SessionError::ShortStream {
@@ -680,9 +702,12 @@ impl<T: Transport> Session<T> {
                         });
                     }
                     body[at..end].copy_from_slice(&chunk.data);
-                    filled = filled.max(end);
+                    filled = end;
                 }
                 Some(proto::reply::Kind::TestFlashEnd(end)) => {
+                    if end.addr != addr {
+                        return Err(SessionError::InvalidStream);
+                    }
                     if filled != declared || end.total as usize != declared {
                         return Err(SessionError::ShortStream {
                             received: filled,

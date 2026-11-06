@@ -232,18 +232,13 @@ impl App {
         }
 
         let identity = self.call("session.version", json!({}))?;
-        self.identity = Some(
-            serde_json::from_value(identity).map_err(|error| error.to_string())?,
-        );
+        self.identity = Some(serde_json::from_value(identity).map_err(|error| error.to_string())?);
 
         let keys = self.call("session.keys", json!({}))?;
         self.keys = serde_json::from_value(keys).map_err(|error| error.to_string())?;
 
         let declared = self.call("session.inputs", json!({}))?;
-        self.inputs = declared
-            .get("inputs")
-            .and_then(Json::as_u64)
-            .unwrap_or(0) as usize;
+        self.inputs = declared.get("inputs").and_then(Json::as_u64).unwrap_or(0) as usize;
 
         let config = self.call("session.config", json!({}))?;
         self.values = serde_json::from_value(config).map_err(|error| error.to_string())?;
@@ -338,10 +333,7 @@ impl App {
     /// more. A device that declares no count falls back to the table's length.
     pub fn remap_len(&self) -> usize {
         match self.inputs {
-            0 => self
-                .remap_key()
-                .map(|key| key.count as usize)
-                .unwrap_or(0),
+            0 => self.remap_key().map(|key| key.count as usize).unwrap_or(0),
             inputs => inputs.min(
                 self.remap_key()
                     .map(|key| key.count as usize)
@@ -412,10 +404,7 @@ impl App {
                     segment: named,
                     keys,
                 }) if *named == segment => *keys += 1,
-                _ => rows.push(Row::Group {
-                    segment,
-                    keys: 1,
-                }),
+                _ => rows.push(Row::Group { segment, keys: 1 }),
             }
         }
         rows
@@ -522,9 +511,7 @@ impl App {
                     return Ok(());
                 };
                 if entry.id == 0 {
-                    return Err(
-                        "the factory profile is the board's own and is not renamed".into()
-                    );
+                    return Err("the factory profile is the board's own and is not renamed".into());
                 }
                 self.editing = Some(Editing {
                     target: Target::ProfileName(self.profile_selected),
@@ -734,8 +721,7 @@ impl App {
             "session.set_key",
             json!({ "key": key.name, "value": value }),
         )?;
-        let written: Value =
-            serde_json::from_value(answer).map_err(|error| error.to_string())?;
+        let written: Value = serde_json::from_value(answer).map_err(|error| error.to_string())?;
         self.values.insert(key.name.clone(), written);
         self.message = format!("{} written", key.name);
         Ok(())
@@ -860,16 +846,19 @@ impl App {
     /// beside the device.
     pub fn about(&self) -> (String, String) {
         let answered = |name: &str, title: String| {
-            (title, crate::labels::about(name).unwrap_or_default().to_string())
+            (
+                title,
+                crate::labels::about(name).unwrap_or_default().to_string(),
+            )
         };
         match self.pane {
             Pane::Keys => match self.rows().get(self.selected) {
-                Some(Row::Group { segment, .. }) => {
-                    answered(segment, segment.clone())
-                }
+                Some(Row::Group { segment, .. }) => answered(segment, segment.clone()),
                 Some(Row::Key(row)) => match self.keys.get(*row) {
                     Some(key) => {
-                        let title = crate::labels::label(&key.name).unwrap_or(&key.name).to_string();
+                        let title = crate::labels::label(&key.name)
+                            .unwrap_or(&key.name)
+                            .to_string();
                         answered(&key.name, title)
                     }
                     None => (String::new(), String::new()),
@@ -879,9 +868,7 @@ impl App {
             Pane::Remap => match self.remap_key() {
                 Some(_) => {
                     let slot = self.remap_selected;
-                    let button = crate::labels::slot(
-                        self.remap_text(slot).parse().unwrap_or(255),
-                    );
+                    let button = crate::labels::slot(self.remap_text(slot).parse().unwrap_or(255));
                     (
                         format!("input {slot:02}"),
                         format!("The button input {slot:02} feeds: {button}."),
@@ -904,7 +891,8 @@ impl App {
             Pane::Sources => match self.sources.get(self.source) {
                 Some(port) => (
                     port.clone(),
-                    "A serial port to open the board on. The device is bound once, here.".to_string(),
+                    "A serial port to open the board on. The device is bound once, here."
+                        .to_string(),
                 ),
                 None => (String::new(), String::new()),
             },
@@ -997,7 +985,14 @@ impl App {
         let Some(text) = self.snapshot.clone() else {
             return Err("no snapshot has been taken".into());
         };
-        let answer = self.call("session.restore", json!({ "snapshot": text }))?;
+        self.saved.clear();
+        let answer = match self.call("session.restore", json!({ "snapshot": text })) {
+            Ok(answer) => answer,
+            Err(error) => {
+                let _ = self.refresh();
+                return Err(error);
+            }
+        };
         let restored: Restored =
             serde_json::from_value(answer).map_err(|error| error.to_string())?;
         let refused = restored
@@ -1023,7 +1018,7 @@ impl App {
             },
             ""
         );
-        self.refreshed()
+        self.refresh()
     }
 
     fn call(&mut self, method: &str, params: Json) -> Result<Json, String> {
@@ -1041,7 +1036,6 @@ impl App {
         Ok(self.client.as_mut().expect("the client was just attached"))
     }
 }
-
 
 /// The values a key's field can take, as a reader scans them: the ones its enum
 /// names, and, while the key's range is short enough to read, the ones it does
@@ -1114,7 +1108,9 @@ mod tests {
 
     fn daemon_on_sim() -> Endpoint {
         let service = Arc::new(thetagp_daemon::Service::new(Duration::from_millis(50)));
-        service.connect(Some(SIMULATED)).expect("the device answers");
+        service
+            .connect(Some(SIMULATED))
+            .expect("the device answers");
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("a socket");
         let port = listener.local_addr().expect("an address").port();
         let token = thetagp_ipc::new_token();
@@ -1146,7 +1142,10 @@ mod tests {
         let mut app = App::at(daemon_on_sim());
         app.refresh().expect("a state");
         assert_eq!(app.connected.as_deref(), Some(SIMULATED));
-        assert_eq!(app.identity.as_ref().map(|named| named.board.as_str()), Some("BoringTechH743"));
+        assert_eq!(
+            app.identity.as_ref().map(|named| named.board.as_str()),
+            Some("BoringTechH743")
+        );
         assert!(app.keys.iter().any(|key| key.name == "led.bri"));
     }
 
@@ -1162,7 +1161,10 @@ mod tests {
 
         app.begin_edit().expect("an edit opens");
         app.editing.as_mut().expect("an edit").text = "9999".into();
-        assert!(app.commit_edit().is_err(), "a value out of range is refused");
+        assert!(
+            app.commit_edit().is_err(),
+            "a value out of range is refused"
+        );
     }
 
     #[test]
@@ -1217,7 +1219,10 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect();
         assert!(drawn.contains("BoringTechH743"), "the board is named");
-        assert!(drawn.contains("▸ led"), "the menu opens on the keys' segments");
+        assert!(
+            drawn.contains("▸ led"),
+            "the menu opens on the keys' segments"
+        );
         assert!(drawn.contains("5 keys"), "and says how many each holds");
     }
 
@@ -1232,7 +1237,9 @@ mod tests {
         assert_eq!(key, "usb.input_mode");
         assert_eq!(current, Some(14));
         assert!(
-            choices.iter().any(|(name, number)| name == "GENERIC" && *number == 14),
+            choices
+                .iter()
+                .any(|(name, number)| name == "GENERIC" && *number == 14),
             "the mode the device is in is among them: {choices:?}"
         );
         assert!(
@@ -1250,15 +1257,21 @@ mod tests {
         let (_, choices, _) = app.options();
         assert_eq!(choices.len(), 33, "0..31 and the one that feeds nothing");
         assert!(
-            choices.iter().any(|(name, number)| *number == 0 && name == "UP"),
+            choices
+                .iter()
+                .any(|(name, number)| *number == 0 && name == "UP"),
             "the first bit is up"
         );
         assert!(
-            choices.iter().any(|(name, number)| *number == 4 && name == "B1"),
+            choices
+                .iter()
+                .any(|(name, number)| *number == 4 && name == "B1"),
             "a face button sits at its own bit"
         );
         assert!(
-            choices.iter().any(|(name, number)| *number == 24 && name == "E1"),
+            choices
+                .iter()
+                .any(|(name, number)| *number == 24 && name == "E1"),
             "an extra button keeps its bit"
         );
         assert!(
@@ -1278,18 +1291,28 @@ mod tests {
         app.refresh().expect("a state");
 
         app.create_profile().expect("a profile is written");
-        assert_eq!(app.profiles.len(), 2, "the new profile is listed beside the factory one");
+        assert_eq!(
+            app.profiles.len(),
+            2,
+            "the new profile is listed beside the factory one"
+        );
         assert!(app.message.contains("created"), "{}", app.message);
 
         app.ask_delete().expect("a delete is asked about");
         assert!(
-            app.prompt
-                .as_ref()
-                .is_some_and(|prompt| *prompt == Prompt::Delete { id: 1, name: String::new() }),
+            app.prompt.as_ref().is_some_and(|prompt| *prompt
+                == Prompt::Delete {
+                    id: 1,
+                    name: String::new()
+                }),
             "the box names the profile it would take"
         );
         app.confirm_delete().expect("the delete is answered");
-        assert_eq!(app.profiles.len(), 1, "the profile is gone, the factory one stays");
+        assert_eq!(
+            app.profiles.len(),
+            1,
+            "the profile is gone, the factory one stays"
+        );
         assert_eq!(app.profiles[0].id, 0);
     }
 
@@ -1367,6 +1390,7 @@ mod tests {
         assert!(text.contains("\"config\""));
         app.restore_snapshot().expect("a restore");
         assert!(app.message.starts_with("restored"), "{}", app.message);
+        assert!(!app.unsaved().is_empty());
     }
 
     fn row_of(app: &App, name: &str) -> usize {
@@ -1558,9 +1582,15 @@ mod tests {
             text.push('\n');
         }
         assert!(text.contains("held"), "the keys the driver holds are named");
-        assert!(text.contains("UP"), "each held key by the button it stands for");
+        assert!(
+            text.contains("UP"),
+            "each held key by the button it stands for"
+        );
         assert!(text.contains("left"), "and each stick named");
-        assert!(text.contains("50%"), "with where the pair stands on its circle");
+        assert!(
+            text.contains("50%"),
+            "with where the pair stands on its circle"
+        );
         assert!(
             text.chars().any(|c| ('\u{2800}'..='\u{28ff}').contains(&c)),
             "and the stick drawn as a circle of dots"
@@ -1660,8 +1690,15 @@ mod tests {
         app.poll_log().expect("the device answers");
 
         let text = screen(&app);
-        assert!(text.contains(" log "), "the panel is on the screen: {}", text.lines().count());
-        assert!(text.contains("sim: the board is up"), "with what the device said");
+        assert!(
+            text.contains(" log "),
+            "the panel is on the screen: {}",
+            text.lines().count()
+        );
+        assert!(
+            text.contains("sim: the board is up"),
+            "with what the device said"
+        );
     }
 
     #[test]
@@ -1774,9 +1811,7 @@ mod tests {
         assert_eq!(app.selected, 0);
         let rows = app.rows();
         assert_eq!(
-            rows.iter()
-                .filter(|row| matches!(row, Row::Key(_)))
-                .count(),
+            rows.iter().filter(|row| matches!(row, Row::Key(_))).count(),
             4,
             "the keys whose names end here are the level"
         );
@@ -1794,7 +1829,10 @@ mod tests {
         app.open_selected().expect("the deeper level opens");
         assert_eq!(app.path, vec!["led".to_string(), "rgb".to_string()]);
         assert_eq!(app.rows().len(), 1, "one key is left at this level");
-        assert_eq!(app.selected_key().map(|at| app.keys[at].name.as_str()), Some("led.rgb.hz"));
+        assert_eq!(
+            app.selected_key().map(|at| app.keys[at].name.as_str()),
+            Some("led.rgb.hz")
+        );
 
         app.go_up().expect("back out one level");
         assert_eq!(app.path, vec!["led".to_string()]);
@@ -1822,7 +1860,11 @@ mod tests {
         select(&mut app, "led.mode");
 
         app.go_in().expect("right on a key");
-        assert_eq!(app.path, vec!["led".to_string()], "a key has no level below");
+        assert_eq!(
+            app.path,
+            vec!["led".to_string()],
+            "a key has no level below"
+        );
         assert!(app.editing.is_none(), "and right does not edit it either");
 
         app.open_selected().expect("enter on a key");

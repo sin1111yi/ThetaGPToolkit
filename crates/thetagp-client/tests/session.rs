@@ -200,9 +200,9 @@ fn a_body_written_to_a_named_profile_keeps_its_id() {
     let mut session = profiles_session();
     let body = a_body(64);
 
-    let id = session.profile_put(3, &body).unwrap();
-    assert_eq!(id, 3);
-    assert_eq!(session.profile_get(3).unwrap(), body);
+    let id = session.profile_create(&body).unwrap();
+    assert_eq!(session.profile_put(id, &body).unwrap(), id);
+    assert_eq!(session.profile_get(id).unwrap(), body);
 }
 
 #[test]
@@ -210,7 +210,7 @@ fn the_exchange_is_still_numbered_after_a_staged_write() {
     let mut session = profiles_session();
     let body = a_body(1500);
 
-    let id = session.profile_put(2, &body).unwrap();
+    let id = session.profile_create(&body).unwrap();
     // The staged write's answer belongs to the exchange and carries zero, so it
     // does not set the numbering back; the arms after it are numbered on.
     session.ping().unwrap();
@@ -221,8 +221,8 @@ fn the_exchange_is_still_numbered_after_a_staged_write() {
 #[test]
 fn a_profile_can_be_listed_selected_and_deleted() {
     let mut session = profiles_session();
-    let first = session.profile_put(1, &a_body(32)).unwrap();
-    let second = session.profile_put(2, &a_body(32)).unwrap();
+    let first = session.profile_create(&a_body(32)).unwrap();
+    let second = session.profile_create(&a_body(32)).unwrap();
 
     let listed = session.profiles().unwrap();
     // The store carries its factory profile 0 besides the two written here.
@@ -279,12 +279,13 @@ fn a_body_the_store_refuses_is_reported() {
 fn a_snapshot_does_not_write_the_factory_profile() {
     let mut session = profiles_session();
     let body = a_body(64);
-    let id = session.profile_put(1, &body).unwrap();
+    let id = session.profile_create(&body).unwrap();
 
     let snapshot = Snapshot {
         board: "test".to_string(),
         version: "1".to_string(),
         config: Default::default(),
+        active_profile: None,
         profiles: vec![
             StoredProfile {
                 id: 0,
@@ -297,8 +298,13 @@ fn a_snapshot_does_not_write_the_factory_profile() {
         ],
     };
 
-    let restored = snapshot.restore(&mut session).expect("the snapshot restores");
-    assert_eq!(restored.profiles_written, 1, "the user's profile is written");
+    let restored = snapshot
+        .restore(&mut session)
+        .expect("the snapshot restores");
+    assert_eq!(
+        restored.profiles_written, 1,
+        "the user's profile is written"
+    );
     assert!(
         restored.profiles_refused.is_empty(),
         "the factory profile is skipped, not refused: {:?}",
@@ -475,4 +481,122 @@ fn a_flash_run_that_stops_short_is_refused() {
         }
         other => panic!("{other}"),
     }
+}
+
+#[test]
+fn streams_reject_gaps_overlaps_and_wrong_metadata() {
+    for (offset, start_addr, end_addr, total) in
+        [(2, 8, 8, 4), (0, 9, 8, 4), (0, 8, 9, 4), (0, 8, 8, 3)]
+    {
+        let mut session = session_with(move |request| {
+            vec![
+                numbered(
+                    &request,
+                    proto::reply::Kind::TestFlashRead(proto::TestFlashReadStart {
+                        addr: start_addr,
+                        total,
+                    }),
+                ),
+                proto::Reply {
+                    queued: Some(0),
+                    kind: Some(proto::reply::Kind::TestFlashChunk(proto::TestFlashChunk {
+                        offset,
+                        data: vec![1; if offset == 0 { 4 } else { 2 }],
+                    })),
+                },
+                proto::Reply {
+                    queued: Some(0),
+                    kind: Some(proto::reply::Kind::TestFlashEnd(proto::TestFlashEnd {
+                        addr: end_addr,
+                        total,
+                    })),
+                },
+            ]
+        });
+        assert!(matches!(
+            session.flash_read(8, 4),
+            Err(SessionError::InvalidStream)
+        ));
+    }
+    let mut session = session_with(|request| {
+        vec![
+            numbered(
+                &request,
+                proto::reply::Kind::ProfileGet(proto::ProfileGetStart { id: 1, total: 4 }),
+            ),
+            proto::Reply {
+                queued: Some(0),
+                kind: Some(proto::reply::Kind::ProfileChunk(proto::ProfileChunk {
+                    offset: 2,
+                    data: vec![1, 2],
+                })),
+            },
+            proto::Reply {
+                queued: Some(0),
+                kind: Some(proto::reply::Kind::ProfileEnd(proto::ProfileEnd {
+                    id: 1,
+                    total: 4,
+                })),
+            },
+        ]
+    });
+    assert!(matches!(
+        session.profile_get(1),
+        Err(SessionError::InvalidStream)
+    ));
+    let mut session = session_with(|request| {
+        vec![
+            numbered(
+                &request,
+                proto::reply::Kind::TestFlashRead(proto::TestFlashReadStart { addr: 8, total: 4 }),
+            ),
+            proto::Reply {
+                queued: Some(0),
+                kind: Some(proto::reply::Kind::TestFlashChunk(proto::TestFlashChunk {
+                    offset: 0,
+                    data: vec![1, 2],
+                })),
+            },
+            proto::Reply {
+                queued: Some(0),
+                kind: Some(proto::reply::Kind::TestFlashChunk(proto::TestFlashChunk {
+                    offset: 1,
+                    data: vec![3, 4, 5],
+                })),
+            },
+        ]
+    });
+    assert!(matches!(
+        session.flash_read(8, 4),
+        Err(SessionError::InvalidStream)
+    ));
+}
+
+#[test]
+fn snapshot_restore_propagates_a_profile_write_timeout() {
+    let mut session = session_with(|request| match request.kind {
+        Some(proto::request::Kind::ConfigListKeys(_)) => vec![numbered(
+            &request,
+            proto::reply::Kind::ConfigListKeys(proto::ConfigListKeysOk::default()),
+        )],
+        Some(proto::request::Kind::ProfileList(_)) => vec![numbered(
+            &request,
+            proto::reply::Kind::ProfileList(proto::ProfileListOk::default()),
+        )],
+        _ => vec![],
+    });
+    let snapshot = Snapshot {
+        board: "x".into(),
+        version: "1".into(),
+        config: Default::default(),
+        active_profile: None,
+        profiles: vec![StoredProfile {
+            id: 1,
+            body: "{}".into(),
+        }],
+    };
+    assert!(matches!(
+        snapshot.restore(&mut session),
+        Err(SessionError::Timeout(_))
+    ));
 }

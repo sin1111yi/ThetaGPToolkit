@@ -50,10 +50,7 @@ impl Service {
     /// it was: no session is held that the device did not confirm.
     pub fn connect(&self, source: Option<&str>) -> Result<String, String> {
         let (name, link) = match source {
-            Some(SIMULATED) => (
-                SIMULATED.to_string(),
-                Box::new(sim::device()) as Link,
-            ),
+            Some(SIMULATED) => (SIMULATED.to_string(), Box::new(sim::device()) as Link),
             Some(port) => (
                 port.to_string(),
                 Box::new(SerialTransport::open(port).map_err(|error| format!("{port}: {error}"))?)
@@ -69,9 +66,7 @@ impl Service {
         };
 
         let mut session = Session::new(link, self.timeout);
-        session
-            .ping()
-            .map_err(|error| format!("{name}: {error}"))?;
+        session.ping().map_err(|error| format!("{name}: {error}"))?;
 
         if let Ok(mut held) = self.session.lock() {
             *held = Some(Open {
@@ -235,7 +230,10 @@ impl Service {
                 None => Err(("no profile was named".to_string(), -32602)),
             },
             "session.profile_create" => self.create_profile(copied_from),
-            "session.profile_rename" => match (profile, request.pointer("/params/name").and_then(Json::as_str)) {
+            "session.profile_rename" => match (
+                profile,
+                request.pointer("/params/name").and_then(Json::as_str),
+            ) {
                 (Some(id), Some(name)) => self.rename_profile(id, name),
                 _ => Err(("a profile and a name are needed".to_string(), -32602)),
             },
@@ -302,11 +300,7 @@ impl Service {
     }
 
     /// Writes one value, held to the key the device declares.
-    fn set_key(
-        &self,
-        name: Option<&str>,
-        value: Option<Json>,
-    ) -> Result<Json, (String, i64)> {
+    fn set_key(&self, name: Option<&str>, value: Option<Json>) -> Result<Json, (String, i64)> {
         let name = name.ok_or(("no key was named".to_string(), -32602))?;
         let carried = value.ok_or(("no value was carried".to_string(), -32602))?;
         let value: Value = serde_json::from_value(carried)
@@ -325,9 +319,10 @@ impl Service {
 
     /// Makes a profile the one the device runs from.
     fn select_profile(&self, id: u64) -> Result<Json, (String, i64)> {
+        let id = u32::try_from(id).map_err(|_| ("profile id is out of range".into(), -32602))?;
         self.with(|session| {
             let selected = session
-                .profile_select(id as u32)
+                .profile_select(id)
                 .map_err(|error| error.to_string())?;
             Ok(json!({ "active": selected.id }))
         })
@@ -336,13 +331,19 @@ impl Service {
     /// Writes a new profile from the body of the one named, or of the one in
     /// effect when none is.
     fn create_profile(&self, from: Option<u64>) -> Result<Json, (String, i64)> {
+        let from = from
+            .map(u32::try_from)
+            .transpose()
+            .map_err(|_| ("profile id is out of range".into(), -32602))?;
         self.with(|session| {
             let source = match from {
-                Some(id) => id as u32,
-                None => session
-                    .profiles()
-                    .map_err(|error| error.to_string())?
-                    .active,
+                Some(id) => id,
+                None => {
+                    session
+                        .profiles()
+                        .map_err(|error| error.to_string())?
+                        .active
+                }
             };
             let body = session
                 .profile_get(source)
@@ -357,16 +358,15 @@ impl Service {
     /// Names a profile: its body is read, the name set in it, and the body
     /// written back, because the name travels in the body.
     fn rename_profile(&self, id: u64, name: &str) -> Result<Json, (String, i64)> {
+        let id = u32::try_from(id).map_err(|_| ("profile id is out of range".into(), -32602))?;
         self.with(|session| {
-            let body = session
-                .profile_get(id as u32)
-                .map_err(|error| error.to_string())?;
+            let body = session.profile_get(id).map_err(|error| error.to_string())?;
             let text = String::from_utf8(body).map_err(|error| error.to_string())?;
             let mut document = read_body(&text)?;
             document["name"] = Json::String(name.to_string());
             let written = serde_json::to_vec(&document).map_err(|error| error.to_string())?;
             session
-                .profile_put(id as u32, &written)
+                .profile_put(id, &written)
                 .map_err(|error| error.to_string())?;
             Ok(json!({ "id": id, "name": name }))
         })
@@ -375,9 +375,10 @@ impl Service {
     /// Deletes a profile the store carries; the factory profile is the device's
     /// own and its refusal comes back as the device states it.
     fn delete_profile(&self, id: u64) -> Result<Json, (String, i64)> {
+        let id = u32::try_from(id).map_err(|_| ("profile id is out of range".into(), -32602))?;
         self.with(|session| {
             session
-                .profile_delete(id as u32)
+                .profile_delete(id)
                 .map_err(|error| error.to_string())?;
             Ok(json!({}))
         })
@@ -388,13 +389,17 @@ impl Service {
         let snapshot = thetagp_client::Snapshot::from_json(text)
             .map_err(|error| (format!("the snapshot did not read: {error}"), -32602))?;
         self.with(|session| {
-            let restored = snapshot.restore(session).map_err(|error| error.to_string())?;
+            let restored = snapshot
+                .restore(session)
+                .map_err(|error| format!("restore may be partial: {error}"))?;
             Ok(json!({
                 "values_written": restored.values_written,
                 "profiles_written": restored.profiles_written,
                 "keys_unknown": restored.keys_unknown,
                 "keys_refused": restored.keys_refused,
                 "profiles_refused": restored.profiles_refused,
+                "profile_ids": restored.profile_ids,
+                "active_profile": restored.active_profile,
             }))
         })
     }
@@ -446,10 +451,7 @@ fn ask_the_ports() -> Result<String, String> {
         let Ok(transport) = SerialTransport::open(&candidate) else {
             continue;
         };
-        let mut probe = Session::new(
-            Box::new(transport) as Link,
-            Duration::from_millis(250),
-        );
+        let mut probe = Session::new(Box::new(transport) as Link, Duration::from_millis(250));
         if probe.ping().is_ok() {
             return Ok(candidate);
         }

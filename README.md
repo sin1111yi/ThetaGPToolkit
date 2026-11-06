@@ -21,6 +21,12 @@ again under them.
   than by the device.
 - A profile is a body that travels in a stream, and a snapshot is the whole of
   what a device is set to: its configuration and every profile, as one file.
+- Restore updates profiles whose IDs already exist and creates missing profiles
+  under IDs assigned by the target. Its result reports the source-to-target ID
+  mapping and restores the active profile when the snapshot records one. The
+  factory profile and unrelated target profiles are left in place. Running
+  configuration changes still need saving, and a failed restore may have
+  already changed part of the device.
 
 ## Features
 

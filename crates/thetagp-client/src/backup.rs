@@ -21,6 +21,9 @@ pub struct Snapshot {
     pub config: BTreeMap<String, Value>,
     /// Every profile the device carried, in id order.
     pub profiles: Vec<StoredProfile>,
+    /// The active profile, absent in snapshots written by older versions.
+    #[serde(default)]
+    pub active_profile: Option<u32>,
 }
 
 /// One profile of a snapshot.
@@ -42,6 +45,8 @@ pub struct Restored {
     pub keys_refused: Vec<String>,
     /// Profiles the snapshot carries and the device would not take.
     pub profiles_refused: Vec<u32>,
+    pub profile_ids: BTreeMap<u32, u32>,
+    pub active_profile: Option<u32>,
 }
 
 impl Snapshot {
@@ -51,7 +56,8 @@ impl Snapshot {
         let config = Config::read(session)?;
 
         let mut profiles = Vec::new();
-        for entry in session.profiles()?.profiles {
+        let listed = session.profiles()?;
+        for entry in listed.profiles {
             let body = session.profile_get(entry.id)?;
             profiles.push(StoredProfile {
                 id: entry.id,
@@ -64,6 +70,7 @@ impl Snapshot {
             version: named.version,
             config: config.values().clone(),
             profiles,
+            active_profile: Some(listed.active),
         })
     }
 
@@ -80,6 +87,39 @@ impl Snapshot {
         let space = session.key_space()?;
         let mut restored = Restored::default();
 
+        let existing: Vec<u32> = session
+            .profiles()?
+            .profiles
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        restored.profile_ids.insert(0, 0);
+        for profile in &self.profiles {
+            if profile.id == 0 {
+                continue;
+            }
+            let result = if existing.contains(&profile.id) {
+                session.profile_put(profile.id, profile.body.as_bytes())
+            } else {
+                session.profile_create(profile.body.as_bytes())
+            };
+            match result {
+                Ok(id) => {
+                    restored.profiles_written += 1;
+                    restored.profile_ids.insert(profile.id, id);
+                }
+                Err(SessionError::Refused(_)) => restored.profiles_refused.push(profile.id),
+                Err(error) => return Err(error),
+            }
+        }
+
+        if let Some(id) = self.active_profile {
+            if let Some(&target) = restored.profile_ids.get(&id) {
+                session.profile_select(target)?;
+                restored.active_profile = Some(target);
+            }
+        }
+
         for (name, value) in &self.config {
             match space.check(name, value) {
                 Ok(()) => {
@@ -88,21 +128,6 @@ impl Snapshot {
                 }
                 Err(Reject::UnknownKey(_)) => restored.keys_unknown.push(name.clone()),
                 Err(_) => restored.keys_refused.push(name.clone()),
-            }
-        }
-
-        for profile in &self.profiles {
-            // Profile 0 is the board's own factory baseline: the store refuses
-            // to write it, and a snapshot restores what a user set, not what the
-            // firmware shipped.
-            if profile.id == 0 {
-                continue;
-            }
-            match session.profile_put(profile.id, profile.body.as_bytes()) {
-                Ok(_) => restored.profiles_written += 1,
-                // One profile the device would not take does not stop the rest:
-                // the report names it and the write goes on.
-                Err(_) => restored.profiles_refused.push(profile.id),
             }
         }
 
