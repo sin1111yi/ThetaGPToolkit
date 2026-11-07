@@ -31,7 +31,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
     // take; the keys run under all three, as wide as the terminal.
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(9), Constraint::Length(4)])
+        .constraints([
+            Constraint::Min(9),
+            Constraint::Length(if app.connected.is_some() { 5 } else { 4 }),
+        ])
         .split(frame.area());
     let columns = Layout::default()
         .direction(Direction::Horizontal)
@@ -1216,6 +1219,12 @@ fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ]),
     ];
     let mut lines = vec![Line::from(message)];
+    if app.connected.is_some() {
+        lines.push(Line::styled(
+            " Configuration changes may delay or interrupt gamepad reports.",
+            Style::default().fg(HIGHLIGHT),
+        ));
+    }
     lines.extend(help);
     frame.render_widget(
         Paragraph::new(lines).block(Block::default().borders(Borders::TOP)),

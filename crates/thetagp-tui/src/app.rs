@@ -1150,6 +1150,16 @@ mod tests {
     }
 
     #[test]
+    fn configuration_report_warning_requires_a_connection() {
+        let mut app = App::at(daemon_on_sim());
+        app.refresh().expect("a state");
+        let warning = "Configuration changes may delay or interrupt gamepad reports.";
+        assert!(screen(&app).contains(warning));
+        app.connected = None;
+        assert!(!screen(&app).contains(warning));
+    }
+
+    #[test]
     fn a_value_is_typed_and_written_held_to_its_key() {
         let mut app = App::at(daemon_on_sim());
         app.refresh().expect("a state");
