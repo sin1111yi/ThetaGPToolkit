@@ -475,19 +475,17 @@ impl<T: Transport> Session<T> {
         })
     }
 
-    /// One navigation step on the panel.
+    /// One key pressed on the panel.
     ///
-    /// The panel answers a step by reporting the page it shows in its next
+    /// The panel answers a key by reporting the page it shows in its next
     /// beat, so the reply carries the page it last reported: a caller that
     /// wants to see the move asks for the state once more.
     pub fn coproc_nav(
         &mut self,
         action: proto::CoprocAction,
-        page: Option<u32>,
     ) -> Result<proto::CoprocNavOk, SessionError> {
         let reply = self.send(proto::request::Kind::CoprocNav(proto::CoprocNav {
             action: action as i32,
-            page,
         }))?;
         expect(reply, |kind| match kind {
             proto::reply::Kind::CoprocNav(ok) => Some(ok),
