@@ -464,6 +464,37 @@ impl<T: Transport> Session<T> {
         })
     }
 
+    /// What the panel board is and what is on its screen.
+    pub fn coproc_state(&mut self) -> Result<proto::CoprocStateOk, SessionError> {
+        let reply = self.send(proto::request::Kind::CoprocGetState(
+            proto::CoprocGetState {},
+        ))?;
+        expect(reply, |kind| match kind {
+            proto::reply::Kind::CoprocState(ok) => Some(ok),
+            _ => None,
+        })
+    }
+
+    /// One navigation step on the panel.
+    ///
+    /// The panel answers a step by reporting the page it shows in its next
+    /// beat, so the reply carries the page it last reported: a caller that
+    /// wants to see the move asks for the state once more.
+    pub fn coproc_nav(
+        &mut self,
+        action: proto::CoprocAction,
+        page: Option<u32>,
+    ) -> Result<proto::CoprocNavOk, SessionError> {
+        let reply = self.send(proto::request::Kind::CoprocNav(proto::CoprocNav {
+            action: action as i32,
+            page,
+        }))?;
+        expect(reply, |kind| match kind {
+            proto::reply::Kind::CoprocNav(ok) => Some(ok),
+            _ => None,
+        })
+    }
+
     /// Every profile the store carries, and which of them is active.
     pub fn profiles(&mut self) -> Result<proto::ProfileListOk, SessionError> {
         let reply = self.send(proto::request::Kind::ProfileList(proto::ProfileList {}))?;

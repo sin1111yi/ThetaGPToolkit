@@ -114,6 +114,11 @@ pub fn catalogue() -> Json {
         }), &["body"]),
         tool("profile_select", "Makes a profile the one the device runs from.", json!({ "id": id }), &["id"]),
         tool("profile_delete", "Deletes a profile.", json!({ "id": id }), &["id"]),
+        tool("coproc_state", "What the panel board is and what is on its screen.", json!({}), &[]),
+        tool("coproc_nav", "Moves the panel's screen: one step of the mark, or straight to a page.", json!({
+            "action": { "type": "string", "enum": ["prev", "next", "enter", "back", "show"], "description": "The step to take; `show` opens the page `page` names" },
+            "page": { "type": "string", "enum": ["menu", "monitor", "options", "mapping", "profiles", "about"], "description": "The page a `show` opens" },
+        }), &["action"]),
         tool("snapshot", "The whole of what the device is set to: its configuration and every profile.", json!({}), &[]),
         tool("restore", "Writes a snapshot's settings onto the device, holding each to the keys it declares.", json!({
             "snapshot": { "type": "string", "description": "The JSON `snapshot` returned" },
@@ -128,6 +133,43 @@ pub fn catalogue() -> Json {
             "hex": { "type": "string", "description": "The frame's bytes, in hex" },
         }), &["hex"]),
     ]})
+}
+
+/// The action a `coproc_nav` names.
+fn coproc_action(name: &str) -> Result<thetagp_proto::CoprocAction, Error> {
+    Ok(match name {
+        "prev" => thetagp_proto::CoprocAction::CoprocPrev,
+        "next" => thetagp_proto::CoprocAction::CoprocNext,
+        "enter" => thetagp_proto::CoprocAction::CoprocEnter,
+        "back" => thetagp_proto::CoprocAction::CoprocBack,
+        "show" => thetagp_proto::CoprocAction::CoprocShow,
+        other => return Err(format!("no step named {other}").into()),
+    })
+}
+
+/// The page a name or a number names, and the name a number carries.
+fn page_number(name: &str) -> Result<u32, Error> {
+    Ok(match name {
+        "menu" => 0,
+        "monitor" => 1,
+        "options" => 2,
+        "mapping" => 3,
+        "profiles" => 4,
+        "about" => 5,
+        other => return Err(format!("no page named {other}").into()),
+    })
+}
+
+fn page_name(page: u32) -> &'static str {
+    match page {
+        0 => "menu",
+        1 => "monitor",
+        2 => "options",
+        3 => "mapping",
+        4 => "profiles",
+        5 => "about",
+        _ => "unknown",
+    }
 }
 
 /// The settings a profile body carries, by key name.
@@ -437,6 +479,33 @@ pub fn call<T: Transport>(
             let request = dynamic::build_request(&arm, &fields)?;
             let reply = session.send_request(request)?;
             text(format!("{reply:#?}"))
+        }
+        "coproc_state" => {
+            let state = session.coproc_state()?;
+            text(json!({
+                "attached": state.attached,
+                "panel": state.panel_id,
+                "release": state.release,
+                "page": page_name(state.page),
+                "item": state.item,
+                "uptime_s": state.uptime_s,
+                "dropped": state.dropped,
+            }))
+        }
+        "coproc_nav" => {
+            let action = coproc_action(&string("action")?)?;
+            let page = match arguments.get("page").and_then(Json::as_str) {
+                Some(name) => Some(page_number(name)?),
+                None => None,
+            };
+            if action == thetagp_proto::CoprocAction::CoprocShow && page.is_none() {
+                return Err("`show` names the page it opens".into());
+            }
+            let moved = session.coproc_nav(action, page)?;
+            text(json!({
+                "page": page_name(moved.page),
+                "item": moved.item,
+            }))
         }
         "decode" => {
             let bytes = dynamic::parse_hex(&string("hex")?)?;
