@@ -1320,26 +1320,100 @@ fn context_keys(app: &App) -> &'static [(&'static str, &'static str)] {
 }
 
 /// Every key, over the device: what the one line under the screen leaves out.
+///
+/// Each row is a glyph, the group it belongs to, then the key in the colour a
+/// press carries and what it does beside it in grey: a reader looks for the
+/// key and reads the meaning, and the two never look alike.
 fn draw_help(frame: &mut Frame, area: ratatui::layout::Rect) {
-    let rows = [
-        ("device", "c connect · d disconnect · R refresh · q quit"),
-        ("menu", "↑↓ move · ←→ level · enter open / edit"),
-        ("values", "type · enter commits · esc leaves · ←→ scale"),
-        ("config", "w save · l load · t snapshot · r restore · x delete"),
-        ("profiles", "↑↓ move · enter activate · e rename · x delete"),
-        ("panel", "p keys over · ↑↓←→ move · enter confirm · ⌫ back"),
-        ("screen", "i input · tab pane · h this table · q quit"),
+    // One glyph per group, from the private use area a Nerd Font fills.
+    let rows: [(&str, &str, &[(&str, &str)]); 7] = [
+        (
+            "\u{f2db}",
+            "device",
+            &[("c", "connect"), ("d", "disconnect"), ("R", "refresh"), ("q", "quit")],
+        ),
+        (
+            "\u{f03a}",
+            "menu",
+            &[("↑↓", "move"), ("←→", "level"), ("enter", "open / edit")],
+        ),
+        (
+            "\u{f044}",
+            "values",
+            &[("type", "a value"), ("enter", "commits"), ("esc", "leaves"), ("←→", "scale")],
+        ),
+        (
+            "\u{f013}",
+            "configuration",
+            &[
+                ("w", "save"),
+                ("l", "load"),
+                ("t", "snapshot"),
+                ("r", "restore"),
+                ("x", "delete"),
+            ],
+        ),
+        (
+            "\u{f07b}",
+            "profiles",
+            &[("↑↓", "move"), ("enter", "activate"), ("e", "rename"), ("x", "delete")],
+        ),
+        (
+            "\u{f108}",
+            "panel",
+            &[
+                ("p", "keys over"),
+                ("↑↓←→", "move"),
+                ("enter", "confirm"),
+                ("⌫", "back"),
+            ],
+        ),
+        (
+            "\u{f26c}",
+            "screen",
+            &[("i", "input view"), ("tab", "pane"), ("h", "this table"), ("q", "quit")],
+        ),
     ];
 
     let mut lines = Vec::new();
-    for (group, keys) in rows {
-        lines.push(Line::from(vec![
+    for (glyph, group, pairs) in rows {
+        // The glyph is the group's own colour, the name beside it grey: the
+        // two columns a reader scans before the keys.
+        let mut spans = vec![
+            Span::styled(format!("{glyph} "), Style::default().fg(ACCENT)),
             Span::styled(format!("{group:<14}"), Style::default().fg(MUTED)),
-            Span::styled(keys, Style::default().fg(Color::White)),
-        ]));
+        ];
+        for (at, (key, meaning)) in pairs.iter().enumerate() {
+            if at > 0 {
+                spans.push(Span::styled(" · ", Style::default().fg(Color::DarkGray)));
+            }
+            spans.push(Span::styled(
+                (*key).to_string(),
+                Style::default().fg(KEY).add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled(
+                format!(" {meaning}"),
+                Style::default().fg(MUTED),
+            ));
+        }
+        lines.push(Line::from(spans));
     }
-    let width = area.width.min(70);
-    let height = (rows.len() as u16 + 3).min(area.height);
+
+    // The two colours the table reads in, named once: what a colour is saying
+    // is not left to be guessed.
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("press", Style::default().fg(KEY).add_modifier(Modifier::BOLD)),
+        Span::styled(" key", Style::default().fg(MUTED)),
+        Span::styled("   ·   ", Style::default().fg(Color::DarkGray)),
+        Span::styled("icon", Style::default().fg(ACCENT)),
+        Span::styled(" group", Style::default().fg(MUTED)),
+        Span::styled("   ·   ", Style::default().fg(Color::DarkGray)),
+        Span::styled("what it does", Style::default().fg(MUTED)),
+    ]));
+
+    let width = area.width.min(72);
+    let height = (rows.len() as u16 + 5).min(area.height);
     let centred = ratatui::layout::Rect {
         x: area.x + area.width.saturating_sub(width) / 2,
         y: area.y + area.height.saturating_sub(height) / 2,
