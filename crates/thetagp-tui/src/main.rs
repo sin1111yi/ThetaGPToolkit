@@ -49,6 +49,11 @@ fn main() -> io::Result<()> {
     if std::env::args().any(|argument| argument == "--panel") {
         app.panel_mode = true;
     }
+    // The key table, drawn over the frame: what `?` opens, for a reader who is
+    // not at the keyboard.
+    if std::env::args().any(|argument| argument == "--keys") {
+        app.help = true;
+    }
 
     // A frame drawn and written as text: what the screen holds, without a
     // terminal to hold it -- for a log, a test or a machine with no display.
@@ -168,6 +173,15 @@ fn handle(app: &mut App, code: KeyCode) -> bool {
         return false;
     }
 
+    // The table is read before a key is acted on: it is a reminder, and the
+    // press that closes it is the one the reader meant to make next.
+    if app.help {
+        app.help = false;
+        if code == KeyCode::Char('?') {
+            return false;
+        }
+    }
+
     // The keys a panel is driven with, while the panel has them: the screen
     // gives up its own meaning for them so the press goes where it is meant.
     if app.panel_mode {
@@ -244,6 +258,8 @@ fn handle(app: &mut App, code: KeyCode) -> bool {
         KeyCode::Char('r') => act(app, |app| app.restore_snapshot()),
         // The panel takes the arrow keys while this is on, and says what it
         // shows in the column beside the device.
+        // Every key, for the press a reader makes when they have forgotten one.
+        KeyCode::Char('?') => app.help = true,
         KeyCode::Char('p') => {
             app.panel_mode = !app.panel_mode;
             if app.panel_mode {

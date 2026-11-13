@@ -33,7 +33,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(9),
-            Constraint::Length(if app.connected.is_some() { 5 } else { 4 }),
+            // The line in focus, a warning while there is one, and the keys
+            // the screen is answering: three rows, whatever the terminal.
+            Constraint::Length(3),
         ])
         .split(frame.area());
     let columns = Layout::default()
@@ -64,6 +66,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
     // panes, never against the description of it.
     draw_edit(frame, app, columns[0]);
     draw_prompt(frame, app, columns[0]);
+    if app.help {
+        // The table covers the device, not the screen: the state it explains
+        // stays in sight beside it.
+        draw_help(frame, columns[0]);
+    }
 }
 
 fn draw_body(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -1253,44 +1260,102 @@ fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         // window's own blue, and a failure in red.
         None => Span::styled(format!(" {}", app.message), Style::default().fg(ACCENT)),
     };
-    // A line of keys: the key in the colour of something to press, the words
-    // beside it grey, so a reader scans the keys and not the prose.
-    let help = vec![
-        keys_line(&[
-            ("tab", "pane"),
-            ("←→", "out of / into a level"),
-            ("enter", "connect / open / edit / activate"),
-            ("x", "delete"),
-            ("i", "input"),
-            ("p", "panel keys"),
-        ]),
-        keys_line(&[
-            ("n", "new profile"),
-            ("e", "name it"),
-            ("w", "save"),
-            ("l", "load"),
-            ("t", "snapshot"),
-            ("r", "restore"),
-            ("d", "disconnect"),
-            ("q", "quit"),
-        ]),
-    ];
+
     let mut lines = vec![Line::from(message)];
-    if app.panel_mode {
+    // A warning only while there is something to warn about: a change the
+    // flash does not hold.
+    if !app.unsaved().is_empty() {
         lines.push(Line::styled(
-            " The arrows, enter and backspace go to the panel; p takes them back.",
+            " not saved: w writes the profile, l reads it back",
             Style::default().fg(HIGHLIGHT),
         ));
     }
-    if app.connected.is_some() {
-        lines.push(Line::styled(
-            " Configuration changes may delay or interrupt gamepad reports.",
-            Style::default().fg(HIGHLIGHT),
-        ));
-    }
-    lines.extend(help);
+    // One line of keys: the ones the pane in focus answers, and the way to the
+    // rest of them.
+    lines.push(keys_line(context_keys(app)));
     frame.render_widget(
         Paragraph::new(lines).block(Block::default().borders(Borders::TOP)),
         area,
+    );
+}
+
+/// The keys the screen is answering now: the pane in focus, or the panel while
+/// it has them. The rest are a `?` away.
+fn context_keys(app: &App) -> &'static [(&'static str, &'static str)] {
+    if app.panel_mode {
+        &[
+            ("↑↓←→", "move"),
+            ("enter", "confirm"),
+            ("⌫", "back"),
+            ("p", "leave the panel"),
+            ("?", "all keys"),
+        ]
+    } else {
+        match app.pane {
+            Pane::Sources => &[("↑↓", "port"), ("enter", "connect"), ("?", "all keys")],
+            Pane::Keys => &[
+                ("↑↓", "move"),
+                ("←→", "level"),
+                ("enter", "open / edit"),
+                ("tab", "pane"),
+                ("?", "all keys"),
+            ],
+            Pane::Remap => &[
+                ("↑↓", "slot"),
+                ("enter", "edit"),
+                ("tab", "pane"),
+                ("?", "all keys"),
+            ],
+            Pane::Profiles => &[
+                ("↑↓", "move"),
+                ("enter", "activate"),
+                ("e", "rename"),
+                ("x", "delete"),
+                ("n", "new"),
+                ("tab", "pane"),
+                ("?", "all keys"),
+            ],
+        }
+    }
+}
+
+/// Every key, over the device: what the one line under the screen leaves out.
+fn draw_help(frame: &mut Frame, area: ratatui::layout::Rect) {
+    let rows = [
+        ("device", "c connect · d disconnect · R refresh · q quit"),
+        ("menu", "↑↓ move · ←→ level · enter open / edit"),
+        ("values", "type · enter commits · esc leaves · ←→ scale"),
+        ("config", "w save · l load · t snapshot · r restore · x delete"),
+        ("profiles", "↑↓ move · enter activate · e rename · x delete"),
+        ("panel", "p keys over · ↑↓←→ move · enter confirm · ⌫ back"),
+        ("screen", "i input · tab pane · ? this table · q quit"),
+    ];
+
+    let mut lines = Vec::new();
+    for (group, keys) in rows {
+        lines.push(Line::from(vec![
+            Span::styled(format!("{group:<14}"), Style::default().fg(MUTED)),
+            Span::styled(keys, Style::default().fg(Color::White)),
+        ]));
+    }
+    let width = area.width.min(70);
+    let height = (rows.len() as u16 + 3).min(area.height);
+    let centred = ratatui::layout::Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+    frame.render_widget(ratatui::widgets::Clear, centred);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: true })
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" keys ")
+                    .border_style(Style::default().fg(HIGHLIGHT)),
+            ),
+        centred,
     );
 }

@@ -155,8 +155,9 @@ pub struct App {
 
     pub snapshot: Option<String>,
     pub pane: Pane,
-    /// Whether the six keys go to the panel instead of the screen, and what
-    /// the panel last said it shows.
+    /// Whether the key table is open over the device, and whether the six
+    /// keys go to the panel instead of the screen.
+    pub help: bool,
     pub panel_mode: bool,
     pub panel: Option<PanelState>,
 
@@ -191,6 +192,7 @@ impl App {
             prompt: None,
             snapshot: None,
             pane: Pane::Keys,
+            help: false,
             panel_mode: false,
             panel: None,
             show_input: false,
