@@ -177,7 +177,7 @@ fn handle(app: &mut App, code: KeyCode) -> bool {
     // press that closes it is the one the reader meant to make next.
     if app.help {
         app.help = false;
-        if code == KeyCode::Char('?') {
+        if code == KeyCode::Char('h') {
             return false;
         }
     }
@@ -259,7 +259,7 @@ fn handle(app: &mut App, code: KeyCode) -> bool {
         // The panel takes the arrow keys while this is on, and says what it
         // shows in the column beside the device.
         // Every key, for the press a reader makes when they have forgotten one.
-        KeyCode::Char('?') => app.help = true,
+        KeyCode::Char('h') => app.help = true,
         KeyCode::Char('p') => {
             app.panel_mode = !app.panel_mode;
             if app.panel_mode {

@@ -1288,23 +1288,23 @@ fn context_keys(app: &App) -> &'static [(&'static str, &'static str)] {
             ("enter", "confirm"),
             ("⌫", "back"),
             ("p", "leave the panel"),
-            ("?", "all keys"),
+            ("h", "all keys"),
         ]
     } else {
         match app.pane {
-            Pane::Sources => &[("↑↓", "port"), ("enter", "connect"), ("?", "all keys")],
+            Pane::Sources => &[("↑↓", "port"), ("enter", "connect"), ("h", "all keys")],
             Pane::Keys => &[
                 ("↑↓", "move"),
                 ("←→", "level"),
                 ("enter", "open / edit"),
                 ("tab", "pane"),
-                ("?", "all keys"),
+                ("h", "all keys"),
             ],
             Pane::Remap => &[
                 ("↑↓", "slot"),
                 ("enter", "edit"),
                 ("tab", "pane"),
-                ("?", "all keys"),
+                ("h", "all keys"),
             ],
             Pane::Profiles => &[
                 ("↑↓", "move"),
@@ -1313,7 +1313,7 @@ fn context_keys(app: &App) -> &'static [(&'static str, &'static str)] {
                 ("x", "delete"),
                 ("n", "new"),
                 ("tab", "pane"),
-                ("?", "all keys"),
+                ("h", "all keys"),
             ],
         }
     }
@@ -1328,7 +1328,7 @@ fn draw_help(frame: &mut Frame, area: ratatui::layout::Rect) {
         ("config", "w save · l load · t snapshot · r restore · x delete"),
         ("profiles", "↑↓ move · enter activate · e rename · x delete"),
         ("panel", "p keys over · ↑↓←→ move · enter confirm · ⌫ back"),
-        ("screen", "i input · tab pane · ? this table · q quit"),
+        ("screen", "i input · tab pane · h this table · q quit"),
     ];
 
     let mut lines = Vec::new();
