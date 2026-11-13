@@ -44,12 +44,18 @@ fn main() -> io::Result<()> {
     if std::env::args().any(|argument| argument == "--input") {
         app.show_input = true;
     }
+    // The panel's keys, handed over before the first frame: a machine driving
+    // a screen without a keyboard reads the same column a reader does.
+    if std::env::args().any(|argument| argument == "--panel") {
+        app.panel_mode = true;
+    }
 
     // A frame drawn and written as text: what the screen holds, without a
     // terminal to hold it -- for a log, a test or a machine with no display.
     if std::env::args().any(|argument| argument == "--frame") {
         app.poll_log().ok();
         app.poll_input().ok();
+        app.poll_panel();
         return print_frame(&app);
     }
 
@@ -108,6 +114,10 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
         // turn is short while it is open: a quarter second between readings
         // would show a press long after it happened.
         app.poll_input().ok();
+        // The panel's own word, read while the keys are going to it: the beat
+        // that answers a press lands within half a second, and the turn after
+        // it shows the page the press reached.
+        app.poll_panel();
         terminal.draw(|frame| ui::draw(frame, app))?;
         let wait = if app.show_input { 40 } else { 250 };
         if event::poll(Duration::from_millis(wait))? {
@@ -156,6 +166,28 @@ fn handle(app: &mut App, code: KeyCode) -> bool {
             _ => {}
         }
         return false;
+    }
+
+    // The keys a panel is driven with, while the panel has them: the screen
+    // gives up its own meaning for them so the press goes where it is meant.
+    if app.panel_mode {
+        let key = match code {
+            KeyCode::Up => Some("up"),
+            KeyCode::Down => Some("down"),
+            KeyCode::Left => Some("left"),
+            KeyCode::Right => Some("right"),
+            KeyCode::Enter => Some("confirm"),
+            KeyCode::Backspace | KeyCode::Esc => Some("back"),
+            _ => None,
+        };
+        if let Some(key) = key {
+            app.error = None;
+            if let Err(error) = app.panel_key(key) {
+                app.error = Some(error);
+            }
+            app.poll_log().ok();
+            return false;
+        }
     }
 
     match code {
@@ -210,6 +242,15 @@ fn handle(app: &mut App, code: KeyCode) -> bool {
         KeyCode::Char('x') => act(app, |app| app.ask_delete()),
         KeyCode::Char('t') => act(app, |app| app.take_snapshot()),
         KeyCode::Char('r') => act(app, |app| app.restore_snapshot()),
+        // The panel takes the arrow keys while this is on, and says what it
+        // shows in the column beside the device.
+        KeyCode::Char('p') => {
+            app.panel_mode = !app.panel_mode;
+            if app.panel_mode {
+                app.panel = None;
+                app.poll_panel();
+            }
+        }
         KeyCode::Char('R') => act(app, |app| app.refresh()),
         _ => {}
     }

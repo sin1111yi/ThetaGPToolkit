@@ -105,6 +105,19 @@ pub struct Editing {
 }
 
 /// Everything one screen shows.
+/// What the panel board is and what is on its screen, as its own beat leaves
+/// it on the main board.
+#[derive(Clone, Debug, Default)]
+pub struct PanelState {
+    pub attached: bool,
+    pub panel: String,
+    pub release: String,
+    pub page: String,
+    pub item: u32,
+    pub uptime_s: u32,
+    pub dropped: u32,
+}
+
 pub struct App {
     client: Option<Client>,
     endpoint: Option<Endpoint>,
@@ -142,6 +155,11 @@ pub struct App {
 
     pub snapshot: Option<String>,
     pub pane: Pane,
+    /// Whether the six keys go to the panel instead of the screen, and what
+    /// the panel last said it shows.
+    pub panel_mode: bool,
+    pub panel: Option<PanelState>,
+
     /// Whether the live input view is shown, and what it last read.
     pub show_input: bool,
     pub input: Option<Json>,
@@ -173,6 +191,8 @@ impl App {
             prompt: None,
             snapshot: None,
             pane: Pane::Keys,
+            panel_mode: false,
+            panel: None,
             show_input: false,
             input: None,
             message: String::new(),
@@ -794,6 +814,72 @@ impl App {
     /// keeps them. A read that fails is not a line of the device's log, so it is
     /// left to the status line.
     /// Reads the input the host's own driver holds, through the daemon.
+    /// One call of the tool surface, with the JSON answer the tool wrote.
+    fn panel_call(&mut self, name: &str, arguments: Json) -> Result<Json, String> {
+        let answer = self.call(
+            "tools/call",
+            json!({ "name": name, "arguments": arguments }),
+        )?;
+        let text = answer
+            .pointer("/content/0/text")
+            .and_then(Json::as_str)
+            .unwrap_or_default();
+        if answer
+            .get("isError")
+            .and_then(Json::as_bool)
+            .unwrap_or(false)
+        {
+            return Err(text.to_string());
+        }
+        serde_json::from_str(text).map_err(|error| error.to_string())
+    }
+
+    /// Reads what the panel shows, for the screen to draw beside the device.
+    pub fn poll_panel(&mut self) {
+        if self.client.is_none() || !self.panel_mode {
+            return;
+        }
+        let read = self.panel_call("coproc_state", json!({}));
+        match read {
+            Ok(state) => {
+                let number = |key: &str| state.get(key).and_then(Json::as_u64).unwrap_or(0) as u32;
+                let text = |key: &str| {
+                    state
+                        .get(key)
+                        .and_then(Json::as_str)
+                        .unwrap_or_default()
+                        .to_string()
+                };
+                self.panel = Some(PanelState {
+                    attached: state
+                        .get("attached")
+                        .and_then(Json::as_bool)
+                        .unwrap_or(false),
+                    panel: text("panel"),
+                    release: text("release"),
+                    page: text("page"),
+                    item: number("item"),
+                    uptime_s: number("uptime_s"),
+                    dropped: number("dropped"),
+                });
+            }
+            Err(error) => {
+                self.panel = None;
+                self.error = Some(error);
+            }
+        }
+    }
+
+    /// Presses one of the six keys on the panel.
+    ///
+    /// The panel answers a key in its next beat, so the screen is read again on
+    /// the next turn rather than here: what a press shows is the press, and
+    /// what the panel says about it a beat later.
+    pub fn panel_key(&mut self, key: &str) -> Result<(), String> {
+        self.panel_call("coproc_nav", json!({ "key": key }))?;
+        Ok(())
+    }
+
     pub fn poll_input(&mut self) -> Result<(), String> {
         if self.client.is_none() || !self.show_input {
             return Ok(());

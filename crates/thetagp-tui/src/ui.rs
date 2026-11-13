@@ -52,7 +52,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
         draw_remap(frame, app, aside[0]);
     } else {
         draw_body(frame, app, columns[0]);
-        draw_about(frame, app, aside[0]);
+        if app.panel_mode {
+            draw_panel(frame, app, aside[0]);
+        } else {
+            draw_about(frame, app, aside[0]);
+        }
     }
     draw_log(frame, app, aside[1]);
     draw_status(frame, app, rows[1]);
@@ -829,6 +833,58 @@ fn draw_header(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 /// What the line in focus is and what it is for. The values it may take are
 /// read where they are written, in the box a value is typed in, so this column
 /// is free to say what the value means.
+/// The panel board's own word: what it is, the page it shows, and where the
+/// mark sits on it. The arrow keys go to it while this is the column drawn.
+fn draw_panel(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let mut lines = Vec::new();
+    let line = |key: &str, value: String| {
+        Line::from(vec![
+            Span::styled(format!("{key:<6}"), Style::default().fg(MUTED)),
+            Span::styled(value, Style::default().fg(Color::White)),
+        ])
+    };
+    match &app.panel {
+        Some(panel) => {
+            lines.push(Line::from(Span::styled(
+                format!("{} {}", panel.panel, panel.release),
+                Style::default().fg(HIGHLIGHT).add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(""));
+            lines.push(line("page", panel.page.clone()));
+            lines.push(line("item", panel.item.to_string()));
+            lines.push(line("up", format!("{}s", panel.uptime_s)));
+            if panel.dropped > 0 {
+                lines.push(line("dropped", panel.dropped.to_string()));
+            }
+            if !panel.attached {
+                lines.push(Line::from(Span::styled(
+                    "the panel is not answering",
+                    Style::default().fg(Color::Red),
+                )));
+            }
+        }
+        None => lines.push(Line::from(Span::styled(
+            "no panel answered",
+            Style::default().fg(MUTED),
+        ))),
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "arrows / enter / backspace",
+        Style::default().fg(MUTED),
+    )));
+    lines.push(Line::from(Span::styled(
+        "go to the panel",
+        Style::default().fg(MUTED),
+    )));
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .block(Block::default().borders(Borders::ALL).title(" panel ")),
+        area,
+    );
+}
+
 fn draw_about(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // The column is narrow, so the name of the line in focus is what the title
     // cannot carry: it opens the body, in the colour kept for what is read
@@ -1206,6 +1262,7 @@ fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             ("enter", "connect / open / edit / activate"),
             ("x", "delete"),
             ("i", "input"),
+            ("p", "panel keys"),
         ]),
         keys_line(&[
             ("n", "new profile"),
@@ -1219,6 +1276,12 @@ fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ]),
     ];
     let mut lines = vec![Line::from(message)];
+    if app.panel_mode {
+        lines.push(Line::styled(
+            " The arrows, enter and backspace go to the panel; p takes them back.",
+            Style::default().fg(HIGHLIGHT),
+        ));
+    }
     if app.connected.is_some() {
         lines.push(Line::styled(
             " Configuration changes may delay or interrupt gamepad reports.",
