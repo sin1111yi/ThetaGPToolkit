@@ -33,13 +33,20 @@ struct Open {
 pub struct Service {
     session: Mutex<Option<Open>>,
     timeout: Duration,
+    stop: std::sync::atomic::AtomicBool,
 }
 
 impl Service {
+    /// Whether a client has asked this daemon to stop.
+    pub fn stopping(&self) -> bool {
+        self.stop.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
     pub fn new(timeout: Duration) -> Service {
         Service {
             session: Mutex::new(None),
             timeout,
+            stop: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -114,7 +121,22 @@ impl Service {
         let snapshot_text = request.pointer("/params/snapshot").and_then(Json::as_str);
 
         let reply: Result<Json, (String, i64)> = match method {
-            "daemon.version" => Ok(json!({ "version": env!("CARGO_PKG_VERSION") })),
+            "daemon.version" => Ok(json!({
+                "version": env!("CARGO_PKG_VERSION"),
+                // The tool surface this build serves: a client compares this
+                // with its own before it trusts the daemon with a call.
+                "fingerprint": format!("{:016x}", thetagp_tools::fingerprint()),
+                "tools": thetagp_tools::catalogue()["tools"]
+                    .as_array()
+                    .map(|tools| tools.len())
+                    .unwrap_or(0),
+            })),
+            // A client that found a daemon of another build asks this one to
+            // stop, so the daemon beside the client takes its place.
+            "daemon.shutdown" => {
+                self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(json!({ "stopping": true }))
+            }
             "session.state" => Ok(self.state()),
             "session.connect" => {
                 let source = request.pointer("/params/source").and_then(Json::as_str);
@@ -508,6 +530,13 @@ pub fn serve_connection(
         let Some(answer) = answer else { continue };
         if writeln!(writer, "{answer}").is_err() || writer.flush().is_err() {
             return;
+        }
+        if service.stopping() {
+            // The answer is out: this build's daemon is the one that goes, and
+            // the client that asked starts the build it carries. The endpoint
+            // goes with it, so no client is pointed at a port nobody listens on.
+            thetagp_ipc::clear_endpoint();
+            std::process::exit(0);
         }
     }
 }

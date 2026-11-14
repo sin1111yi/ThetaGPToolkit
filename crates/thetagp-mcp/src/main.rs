@@ -81,10 +81,31 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Whether the daemon on the socket serves the tools this build carries.
+///
+/// The tool list is the contract between the two halves, so the list is what
+/// the two compare: a daemon built before a tool existed answers every call
+/// for it with "no tool named".
+fn current(client: &mut thetagp_ipc::Client) -> bool {
+    let ours = format!("{:016x}", thetagp_tools::fingerprint());
+    match client.call("daemon.version", serde_json::json!({})) {
+        Ok(answer) => answer.get("fingerprint").and_then(Json::as_str) == Some(ours.as_str()),
+        Err(_) => false,
+    }
+}
+
 /// The daemon that owns the device, started beside this binary when none runs.
 fn daemon(cli: &Cli) -> Result<thetagp_ipc::Client, Box<dyn std::error::Error>> {
-    if let Ok(client) = thetagp_ipc::Client::connect() {
-        return Ok(client);
+    if let Ok(mut client) = thetagp_ipc::Client::connect() {
+        if current(&mut client) {
+            return Ok(client);
+        }
+        // The daemon on the socket was built with another tool surface: it is
+        // asked to go, and this binary's own daemon takes its place below.
+        eprintln!("thetagp-mcp: the daemon serves another build; replacing it");
+        let _ = client.call("daemon.shutdown", serde_json::json!({}));
+        drop(client);
+        std::thread::sleep(Duration::from_millis(250));
     }
 
     let name = if cfg!(windows) {
@@ -117,8 +138,10 @@ fn daemon(cli: &Cli) -> Result<thetagp_ipc::Client, Box<dyn std::error::Error>> 
     // waits for that rather than for a fixed delay.
     for _ in 0..50 {
         std::thread::sleep(Duration::from_millis(100));
-        if let Ok(client) = thetagp_ipc::Client::connect() {
-            return Ok(client);
+        if let Ok(mut client) = thetagp_ipc::Client::connect() {
+            if current(&mut client) {
+                return Ok(client);
+            }
         }
     }
     Err("the daemon did not come up; run thetagp-daemon and read its output".into())

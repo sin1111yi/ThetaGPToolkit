@@ -1158,9 +1158,28 @@ fn choices_of(key: &Key) -> Vec<(String, i32)> {
 }
 
 /// The daemon that owns the device, started beside this binary when none runs.
+/// Whether the daemon on the socket serves the tools this build carries.
+///
+/// The tool list is the contract between the two halves: a daemon built
+/// before a tool existed answers every call for it with "no tool named".
+fn current(client: &mut Client) -> bool {
+    let ours = format!("{:016x}", thetagp_tools::fingerprint());
+    match client.call("daemon.version", json!({})) {
+        Ok(answer) => answer.get("fingerprint").and_then(Json::as_str) == Some(ours.as_str()),
+        Err(_) => false,
+    }
+}
+
 fn daemon() -> Result<Client, String> {
-    if let Ok(client) = Client::connect() {
-        return Ok(client);
+    if let Ok(mut client) = Client::connect() {
+        if current(&mut client) {
+            return Ok(client);
+        }
+        // The daemon on the socket was built with another tool surface: it is
+        // asked to go, and this binary's own daemon takes its place below.
+        let _ = client.call("daemon.shutdown", json!({}));
+        drop(client);
+        std::thread::sleep(std::time::Duration::from_millis(250));
     }
 
     let name = if cfg!(windows) {
@@ -1180,8 +1199,10 @@ fn daemon() -> Result<Client, String> {
 
     for _ in 0..50 {
         std::thread::sleep(std::time::Duration::from_millis(100));
-        if let Ok(client) = Client::connect() {
-            return Ok(client);
+        if let Ok(mut client) = Client::connect() {
+            if current(&mut client) {
+                return Ok(client);
+            }
         }
     }
     Err("the daemon did not come up".into())

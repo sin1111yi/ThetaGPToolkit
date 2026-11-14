@@ -61,6 +61,19 @@ fn tool(name: &str, description: &str, properties: Json, required: &[&str]) -> J
     })
 }
 
+/// What this build's tool surface is, as a number: two builds that serve the
+/// same tools carry the same number, and one that grew a tool does not.
+pub fn fingerprint() -> u64 {
+    // FNV-1a over the catalogue's own text: the list is the contract, so the
+    // list is what is hashed.
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in catalogue().to_string().bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
 /// Every tool, as the host asks for them.
 pub fn catalogue() -> Json {
     let id = json!({ "type": "integer", "description": "The profile's id" });

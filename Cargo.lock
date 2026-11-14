@@ -987,6 +987,7 @@ dependencies = [
  "thetagp-daemon",
  "thetagp-ipc",
  "thetagp-proto",
+ "thetagp-tools",
 ]
 
 [[package]]
