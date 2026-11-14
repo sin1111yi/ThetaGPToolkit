@@ -390,7 +390,9 @@ pub fn call<T: Transport>(
             let profiles: Vec<Json> = listed
                 .profiles
                 .iter()
-                .map(|entry| json!({ "id": entry.id, "active": entry.active }))
+                .map(|entry| {
+                    json!({ "id": entry.id, "active": entry.active, "name": entry.name })
+                })
                 .collect();
             text(json!({ "active": listed.active, "profiles": profiles }))
         }
